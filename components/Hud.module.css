@@ -1,0 +1,122 @@
+.hud {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 10;
+  min-width: 176px;
+  padding: 9px 12px 10px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--line);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.instance {
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.title {
+  display: block;
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  color: var(--faint);
+}
+
+/* 배너는 둘 다 숨겨져 있는 것이 정상 상태라 평소에는 HUD 높이에 영향을 주지 않는다 */
+.notices:has(> .notice:not([hidden])) {
+  margin-bottom: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.notice {
+  margin: 0;
+  padding: 4px 7px;
+  border-left: 2px solid currentColor;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.notice[data-kind="degraded"] {
+  color: var(--danger);
+}
+
+.notice[data-kind="paused"] {
+  color: var(--warn);
+}
+
+.noticeTitle {
+  display: block;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.noticeDetail {
+  display: block;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  opacity: 0.8;
+}
+
+.list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.label {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.value {
+  margin: 0;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.value[data-state="live"] {
+  color: var(--ok);
+}
+
+.value[data-state="replaying"] {
+  color: var(--accent);
+}
+
+.value[data-state="connecting"],
+.value[data-state="reconnecting"] {
+  color: var(--warn);
+}
+
+.value[data-state="closed"],
+.value[data-state="failed"] {
+  color: var(--danger);
+}

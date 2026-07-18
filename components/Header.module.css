@@ -1,0 +1,151 @@
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: 4px 4px 0;
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  min-width: 0;
+}
+
+.mark {
+  font-family: var(--font-mono), monospace;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.32em;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.markDot {
+  color: var(--accent);
+}
+
+.sub {
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.badge[data-state="live"] {
+  color: var(--text);
+  border-color: var(--tick);
+}
+
+.badge[data-state="live"] .dot {
+  background: var(--ok);
+  box-shadow: 0 0 6px var(--ok);
+}
+
+/* 되감기 재생 중 — 데이터는 들어오지만 과거 구간이라 live와 구분한다 */
+.badge[data-state="replaying"] {
+  color: var(--text);
+  border-color: var(--tick);
+}
+
+.badge[data-state="replaying"] .dot {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  animation: blink 0.8s steps(2, end) infinite;
+}
+
+.badge[data-state="connecting"] .dot,
+.badge[data-state="reconnecting"] .dot {
+  background: var(--warn);
+}
+
+.badge[data-state="reconnecting"] .dot {
+  animation: blink 1s steps(2, end) infinite;
+}
+
+.badge[data-state="failed"] .dot,
+.badge[data-state="closed"] .dot {
+  background: var(--danger);
+}
+
+.badge[data-state="failed"] {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badge .dot {
+    animation: none;
+  }
+}
+
+.btn {
+  padding: 4px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--tick);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* 기본값에서 벗어난 컨트롤은 눈에 띄어야 한다 — 지금 화면이 왜 이런지의 설명이라서 */
+.btn[data-filter="full"] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.btn[data-paused="true"] {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 55%, transparent);
+}

@@ -1,0 +1,98 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.controls {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.swatch {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 1px;
+}
+
+/* 갭/리플레이 띠 범례 — 차트 위 띠와 같은 모양(반투명 채움 + 파선 테두리) */
+.bandSwatch {
+  width: 12px;
+  height: 8px;
+  flex-shrink: 0;
+  border: 1px dashed;
+  border-radius: 1px;
+}
+
+.windowToggle {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.windowButton {
+  border: 1px solid var(--line);
+  background: transparent;
+  padding: 1px 7px;
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.windowButton:hover {
+  border-color: var(--tick);
+  color: var(--text);
+}
+
+.windowButton[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chartWrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* uPlot 기본 커서 색은 라이트 테마 기준값이라 다크 팔레트에 맞춰 덮어쓴다 */
+.chartWrap :global(.u-cursor-x),
+.chartWrap :global(.u-cursor-y) {
+  border-color: var(--tick) !important;
+  border-style: solid !important;
+}
+
+.chartWrap :global(.u-select) {
+  background: rgba(215, 226, 238, 0.08);
+}

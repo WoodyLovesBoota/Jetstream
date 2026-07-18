@@ -1,0 +1,71 @@
+.deck {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  padding: var(--gap);
+  gap: var(--gap);
+}
+
+.grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: var(--gap);
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-template-rows: minmax(160px, 30vh) minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.pulse {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+.tape {
+  grid-column: 1 / 9;
+  grid-row: 2 / 4;
+  max-height: 320px;
+}
+
+.surge {
+  grid-column: 9 / -1;
+  grid-row: 2;
+}
+
+.mix {
+  grid-column: 9 / -1;
+  grid-row: 3;
+}
+
+@media (max-width: 1279.98px) {
+  .deck {
+    height: auto;
+    min-height: 100dvh;
+  }
+
+  .grid {
+    grid-template-rows: none;
+    grid-auto-rows: minmax(220px, auto);
+  }
+
+  .pulse,
+  .tape,
+  .surge,
+  .mix {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+
+  .tape {
+    min-height: 320px;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1279.98px) {
+  .surge {
+    grid-column: 1 / 7;
+  }
+
+  .mix {
+    grid-column: 7 / -1;
+  }
+}

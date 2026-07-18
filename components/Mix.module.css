@@ -1,0 +1,148 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.statusBar {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+}
+
+.status {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.listWrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+}
+
+/*
+ * 단일 화면 레이아웃(≥1280px)에서 Mix는 우하단 칸이고, 그 위에 플로팅 HUD가
+ * 고정으로 얹힌다. HUD가 덮는 폭만큼 비워 막대와 %가 가려지지 않게 한다 —
+ * 값은 Hud.module.css의 `right: 16px` + `min-width: 176px`에 맞춘 여유값.
+ */
+@media (min-width: 1280px) {
+  .listWrap {
+    padding-right: 210px;
+  }
+}
+
+.list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  /* 인접 막대를 갈라놓는 것은 테두리가 아니라 표면 간격 2px */
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow: hidden;
+}
+
+/*
+ * 9행이 패널 높이를 나눠 갖되 20px을 넘지 않는다 — 패널이 짧아지면 행이 줄어들 뿐
+ * 마지막 행이 잘려나가지 않는다.
+ */
+.row {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  /* 행 높이가 밭을 때 줄상자가 행을 밀어내지 않도록 */
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* 아직 채워지지 않은 순위 — 레이아웃은 유지하고 내용만 감춘다 */
+.row[data-filled="false"] {
+  visibility: hidden;
+}
+
+/* 언어 코드는 2-3자지만 "other"까지 잘리지 않고 들어가야 한다 */
+.label {
+  flex: none;
+  width: 5ch;
+  color: var(--text);
+}
+
+/* other는 잔여 합산값이라 정체성 색을 새로 소비하지 않고 톤을 낮춘다 (Pulse와 같은 규칙) */
+.row[data-lang="other"] .label {
+  color: var(--muted);
+}
+
+.track {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 8px;
+  background: rgba(57, 135, 229, 0.08);
+}
+
+.fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  min-width: 2px;
+  /* 데이터 끝만 둥글게, 기준선 쪽은 각지게 */
+  border-radius: 0 2px 2px 0;
+  background: #3987e5;
+  /* 스냅샷은 10Hz — 그 사이를 메워 계단이 아니라 흐름으로 읽히게 한다 */
+  transition: width 110ms linear;
+}
+
+.row[data-lang="other"] .fill {
+  background: #47586c;
+}
+
+.pct {
+  flex: none;
+  width: 6ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.root[data-empty="false"] .empty {
+  display: none;
+}
+
+.root[data-empty="true"] .list {
+  visibility: hidden;
+}
