@@ -1,9 +1,15 @@
 /// <reference lib="webworker" />
 
 import {
+  GAUGE_COLLECTIONS,
+  GAUGE_EMA_TAU_MS,
+  GAUGE_STAT_WINDOW_SEC,
   RING_SECONDS,
   SNAPSHOT_INTERVAL_MS,
   TAPE_TARGET_ROWS_PER_SEC,
+  type GaugeKind,
+  type GaugeStat,
+  type GaugesSnapshot,
   type MainToWorker,
   type SecondBucket,
   type StreamSnapshot,
@@ -90,6 +96,72 @@ function makeRateWindow(): (total: number) => number {
 const recvRate = makeRateWindow();
 const procRate = makeRateWindow();
 const dropRate = makeRateWindow();
+
+// ── 게이지: 타입별 EMA rate + p95·1분 평균 ──────────────────────────
+//
+// 큰 숫자(EMA)는 10Hz 슬라이딩 1초 창 rate를 시정수 GAUGE_EMA_TAU_MS로 감아
+// 계산하고, 채움 분모(p95)와 델타 기준(1분 평균)은 1Hz로 완결 초 60개에서
+// 다시 구한다. 전부 워커 계산 — 메인 스레드는 받은 값을 그리기만 한다.
+
+const GAUGE_KINDS: GaugeKind[] = ["post", "like", "repost", "follow"];
+const gaugeKindOf = new Map<string, GaugeKind>(
+  GAUGE_KINDS.map((k) => [GAUGE_COLLECTIONS[k], k]),
+);
+
+const gaugeTotals: Record<GaugeKind, number> = { post: 0, like: 0, repost: 0, follow: 0 };
+const gaugeRates = {
+  post: makeRateWindow(),
+  like: makeRateWindow(),
+  repost: makeRateWindow(),
+  follow: makeRateWindow(),
+};
+const gaugeEma: Record<GaugeKind, number> = { post: 0, like: 0, repost: 0, follow: 0 };
+const gaugeP95: Record<GaugeKind, number> = { post: 0, like: 0, repost: 0, follow: 0 };
+const gaugeAvg: Record<GaugeKind, number> = { post: 0, like: 0, repost: 0, follow: 0 };
+let gaugeLastTickMs = Number.NaN;
+let gaugeLastStatSec = -1;
+
+function gaugesSnapshot(nowSec: number): GaugesSnapshot {
+  // EMA 계수는 실경과시간으로 매 틱 다시 구한다 — 틱이 늦어져도 τ초 반응 유지
+  const nowMs = performance.now();
+  const dtMs = Number.isNaN(gaugeLastTickMs) ? SNAPSHOT_INTERVAL_MS : nowMs - gaugeLastTickMs;
+  gaugeLastTickMs = nowMs;
+  const alpha = 1 - Math.exp(-dtMs / GAUGE_EMA_TAU_MS);
+
+  // p95·평균은 1Hz면 충분하다 — 완결 초만 보므로 초가 바뀔 때만 다시 계산
+  if (nowSec !== gaugeLastStatSec) {
+    gaugeLastStatSec = nowSec;
+    const vals = new Array<number>(GAUGE_STAT_WINDOW_SEC);
+    for (const kind of GAUGE_KINDS) {
+      const collection = GAUGE_COLLECTIONS[kind];
+      let sum = 0;
+      for (let i = 0; i < GAUGE_STAT_WINDOW_SEC; i++) {
+        const sec = nowSec - GAUGE_STAT_WINDOW_SEC + i;
+        const slot = ring[sec % RING_SECONDS];
+        const v = slot.t === sec ? (slot.collections[collection] ?? 0) : 0;
+        vals[i] = v;
+        sum += v;
+      }
+      vals.sort((a, b) => a - b);
+      gaugeP95[kind] = vals[Math.ceil(0.95 * GAUGE_STAT_WINDOW_SEC) - 1];
+      gaugeAvg[kind] = sum / GAUGE_STAT_WINDOW_SEC;
+    }
+  }
+
+  const cur = ring[nowSec % RING_SECONDS];
+  const stats = {} as Record<GaugeKind, GaugeStat>;
+  for (const kind of GAUGE_KINDS) {
+    const rate = gaugeRates[kind](gaugeTotals[kind]);
+    gaugeEma[kind] += (rate - gaugeEma[kind]) * alpha;
+    stats[kind] = {
+      partial: cur.t === nowSec ? (cur.collections[GAUGE_COLLECTIONS[kind]] ?? 0) : 0,
+      ema: gaugeEma[kind],
+      p95: gaugeP95[kind],
+      avg60: gaugeAvg[kind],
+    };
+  }
+  return { sec: nowSec, stats };
+}
 
 // ── Tape: app.bsky.feed.post 1/N stride 샘플링 ──────────────────────
 //
@@ -205,6 +277,9 @@ function processFrame(data: unknown): void {
       const collection = ev.commit?.collection;
       if (typeof collection === "string") {
         bucket.collections[collection] = (bucket.collections[collection] ?? 0) + 1;
+        // 게이지 EMA rate의 분자 — 차트 시리즈와 같은 대상(collection 전체 op)을 센다
+        const gaugeKind = gaugeKindOf.get(collection);
+        if (gaugeKind !== undefined) gaugeTotals[gaugeKind]++;
       }
 
       if (collection === "app.bsky.feed.post" && ev.commit?.operation === "create") {
@@ -320,6 +395,7 @@ function takeSnapshot(): StreamSnapshot {
   return {
     ts: Date.now(),
     buckets,
+    gauges: gaugesSnapshot(nowSec),
     counters: {
       recvTotal,
       recvPerSec: recvRate(recvTotal),
@@ -339,7 +415,7 @@ function takeSnapshot(): StreamSnapshot {
       sampledPerSec: tapeSampledRate(tapeSampledTotal),
       skippedPerSec: tapeSkippedRate(tapeSkippedTotal),
     },
-    surge: surgeSnapshot.top,
+    surge: surgeSnapshot.data,
     surgeStats: surgeSnapshot.stats,
     gaps: connection.gaps(nowSec),
     backpressure: backpressure.stats(stallPerFrameUs > 0 && Date.now() < stallUntilMs),
@@ -379,6 +455,10 @@ self.onmessage = (e: MessageEvent<MainToWorker>) => {
     case "setFilter":
       // 재연결하되 커서를 재사용한다 — 전환 구간이 비지 않고 갭도 남지 않는다
       connection.setFilter(msg.wantedCollections);
+      break;
+    case "surgeTune":
+      // 세션 한정 튜닝 — 적용된 실제 값은 스냅샷의 surge.tuning으로 되돌아간다
+      surge.tune(msg.tuning);
       break;
     case "debug":
       if (msg.action === "drop") {

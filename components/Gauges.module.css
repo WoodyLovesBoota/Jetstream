@@ -1,0 +1,95 @@
+.strip {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--gap);
+}
+
+/* 셀별 타입 색은 인라인 --type-color로 들어온다 (lib/palette.ts가 유일한 원천) */
+.cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  height: 74px;
+  padding: 9px var(--pad) 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+/* 배경 채움 게이지 — transform: scaleY만 갱신하므로 리플로우가 없다 */
+.fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: bottom;
+  transform: scaleY(0);
+  will-change: transform;
+  pointer-events: none;
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--type-color) 30%, transparent),
+    color-mix(in srgb, var(--type-color) 8%, transparent)
+  );
+}
+
+.head {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.label {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--type-color);
+}
+
+.delta {
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.delta[data-dir="up"] {
+  color: var(--ok);
+}
+
+.delta[data-dir="down"] {
+  color: var(--danger);
+}
+
+.num {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.value {
+  font-family: var(--font-mono), monospace;
+  font-size: 24px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  color: var(--text);
+}
+
+.unit {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+@media (max-width: 767.98px) {
+  .strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

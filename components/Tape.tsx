@@ -14,7 +14,8 @@ import styles from "./Tape.module.css";
 // 배치) 설계 §1.3의 "데이터 경로 리렌더 금지"가 노리는 초당 수천 건 리렌더와는
 // 무관하다. 상태줄(showing/sampled/skipped)은 그 원칙대로 ref+textContent로 갱신.
 
-const ROW_HEIGHT = 24;
+/** 세로 테이프 행: 메타 한 줄 + 본문 2줄 말줄임 — Tape.module.css의 .row와 맞물린 값 */
+const ROW_HEIGHT = 56;
 /** 이 거리(px) 안이면 "꼭대기"로 간주 — 프로그램적 스크롤도 여기 걸려야 자동스크롤이 안 끊긴다 */
 const TOP_THRESHOLD_PX = 48;
 
@@ -130,10 +131,12 @@ export default function Tape() {
                   className={styles.row}
                   style={{ transform: `translateY(${vi.start}px)` }}
                 >
-                  <span className={styles.time}>{formatTimeUs(row.timeUs)}</span>
-                  <span className={styles.did}>{row.did}</span>
-                  <span className={styles.langs}>{row.langs.join(",") || "—"}</span>
-                  <span className={styles.text}>{row.text}</span>
+                  <div className={styles.meta}>
+                    <span className={styles.time}>{formatTimeUs(row.timeUs)}</span>
+                    <span className={styles.did}>{row.did}</span>
+                    <span className={styles.langs}>{row.langs.join(",") || "—"}</span>
+                  </div>
+                  <p className={styles.text}>{row.text}</p>
                 </div>
               );
             })}

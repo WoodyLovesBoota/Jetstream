@@ -6,34 +6,58 @@
   gap: var(--gap);
 }
 
+/*
+ * 스루풋 차트 — 전폭 낮은 밴드(약 15vh). 반드시 **정해진 높이**여야 한다:
+ * 내부 차트가 height: 100% 체인으로 이 값을 받아 가므로, auto가 되는 순간
+ * 차트 높이가 0으로 붕괴한다(좁은 창에서 실측 1px로 재현됐던 회귀).
+ * clamp 하한은 축·컨트롤을 빼고도 플롯 영역이 읽히는 최소치다.
+ */
+.pulse {
+  flex: none;
+  height: clamp(150px, 16vh, 240px);
+}
+
+/* 낮은 밴드에서는 패널 기본 패딩(14px)이 차트 높이를 다 잡아먹는다 — 몸통만 얇게.
+   Panel의 구조상 몸통은 header 다음의 마지막 div다(클래스는 해시라 구조로 잡는다). */
+.pulse > div:last-child {
+  padding: 4px 10px 6px;
+}
+
+/* 메인 그리드 — Surge가 주인공(좌 62%), 우 38% 컬럼에 Tape·Mix·HUD */
 .grid {
   flex: 1;
   min-height: 0;
   display: grid;
   gap: var(--gap);
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  grid-template-rows: minmax(160px, 30vh) minmax(0, 1fr) minmax(0, 1fr);
-}
-
-.pulse {
-  grid-column: 1 / -1;
-  grid-row: 1;
-}
-
-.tape {
-  grid-column: 1 / 9;
-  grid-row: 2 / 4;
-  max-height: 320px;
+  grid-template-columns: minmax(0, 62fr) minmax(0, 38fr);
 }
 
 .surge {
-  grid-column: 9 / -1;
-  grid-row: 2;
+  min-height: 0;
 }
 
+.side {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  /* 세로가 짧은 화면에서는 Mix(185)+HUD(234) 고정 높이가 컬럼을 다 먹어 Tape(flex:1)가
+     0으로 찌부러진다(실측: 776px 높이에서 Tape 33px, scrollArea 0). 그때는 컬럼 안에서만
+     스크롤해 Tape의 최소 높이를 지킨다 — 데크 전체 단일 화면은 그대로 두고 여기서만 흡수. */
+  overflow-y: auto;
+}
+
+.tape {
+  flex: 1;
+  /* Mix·HUD에 밀려도 이 아래로는 안 줄어든다 — 라이브 테이프가 항상 읽히는 최소치(≈3행) */
+  min-height: 220px;
+}
+
+/* 9행(상위 8 + other) × 행높이 + 크롬이 겹치지 않는 최소치 */
 .mix {
-  grid-column: 9 / -1;
-  grid-row: 3;
+  flex: none;
+  height: 185px;
 }
 
 @media (max-width: 1279.98px) {
@@ -42,30 +66,19 @@
     min-height: 100dvh;
   }
 
+  /* .pulse는 전역 clamp 높이를 그대로 쓴다 — auto로 풀면 차트가 0으로 붕괴한다 */
+
   .grid {
-    grid-template-rows: none;
-    grid-auto-rows: minmax(220px, auto);
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .pulse,
-  .tape,
-  .surge,
-  .mix {
-    grid-column: 1 / -1;
-    grid-row: auto;
+  .surge {
+    /* 10행 × 40px + 탭·컬럼헤드·상태줄 크롬 */
+    min-height: 560px;
   }
 
   .tape {
-    min-height: 320px;
-  }
-}
-
-@media (min-width: 768px) and (max-width: 1279.98px) {
-  .surge {
-    grid-column: 1 / 7;
-  }
-
-  .mix {
-    grid-column: 7 / -1;
+    flex: none;
+    height: 360px;
   }
 }

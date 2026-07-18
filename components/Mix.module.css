@@ -34,17 +34,6 @@
   padding-top: 6px;
 }
 
-/*
- * 단일 화면 레이아웃(≥1280px)에서 Mix는 우하단 칸이고, 그 위에 플로팅 HUD가
- * 고정으로 얹힌다. HUD가 덮는 폭만큼 비워 막대와 %가 가려지지 않게 한다 —
- * 값은 Hud.module.css의 `right: 16px` + `min-width: 176px`에 맞춘 여유값.
- */
-@media (min-width: 1280px) {
-  .listWrap {
-    padding-right: 210px;
-  }
-}
-
 .list {
   flex: 1;
   min-height: 0;

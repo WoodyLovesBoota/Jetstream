@@ -8,21 +8,37 @@
   min-height: 0;
 }
 
-.statusBar {
+/* ── 탭 ─────────────────────────────────────────────────────────── */
+
+.tabs {
   display: flex;
   flex: none;
-  align-items: baseline;
+  gap: 2px;
 }
 
-.status {
+.tab {
+  border: 1px solid var(--line);
+  background: transparent;
+  padding: 3px 12px;
   font-family: var(--font-mono), monospace;
   font-size: 11px;
-  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
   color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  cursor: pointer;
 }
+
+.tab:hover {
+  border-color: var(--tick);
+  color: var(--text);
+}
+
+.tab[aria-selected="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+/* ── 리스트 ──────────────────────────────────────────────────────── */
 
 .listWrap {
   position: relative;
@@ -31,6 +47,8 @@
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--line);
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .colHead {
@@ -38,7 +56,7 @@
   flex: none;
   align-items: baseline;
   gap: 10px;
-  padding: 3px 2px;
+  padding: 4px 2px;
   border-bottom: 1px solid var(--line);
   font-family: var(--font-mono), monospace;
   font-size: 10px;
@@ -48,13 +66,11 @@
 }
 
 .list {
-  flex: 1;
-  min-height: 0;
+  position: relative;
+  flex: none;
   margin: 0;
   padding: 0;
   list-style: none;
-  overflow-y: auto;
-  overflow-x: hidden;
 }
 
 .listWrap[data-empty="true"] .colHead,
@@ -62,25 +78,30 @@
   visibility: hidden;
 }
 
+/*
+ * FLIP: 행은 절대 배치 + translateY로만 움직인다(리플로우 없음). 순위 변경은
+ * 워커의 5초 재정렬 때만 오므로 400ms 전환이 그때 한 번 부드럽게 흐른다.
+ * 신규 바인딩·탭 전환은 data-instant로 전환을 끄고 제자리에 즉시 놓는다.
+ */
 .row {
+  position: absolute;
+  top: 0;
+  left: 0;
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 24px;
+  width: 100%;
+  height: 40px;
   padding: 0 2px;
   border-bottom: 1px solid var(--line);
   font-family: var(--font-mono), monospace;
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
-  transition:
-    background-color 600ms ease,
-    box-shadow 600ms ease;
+  transition: transform 400ms ease;
+  will-change: transform;
 }
 
-/* 랭킹에 방금 진입한 토큰 — 즉시 점등 후 부드럽게 소등 */
-.row[data-new="true"] {
-  background-color: color-mix(in srgb, var(--accent) 16%, transparent);
-  box-shadow: inset 2px 0 0 var(--accent);
+.row[data-instant="true"] {
   transition: none;
 }
 
@@ -89,12 +110,32 @@
   visibility: hidden;
 }
 
+/* ── 셀 ─────────────────────────────────────────────────────────── */
+
 .rank {
   flex: none;
   width: 2ch;
   text-align: right;
   font-variant-numeric: tabular-nums;
   color: var(--faint);
+}
+
+/* 순위 변동 ▲n/▼n/– */
+.delta {
+  flex: none;
+  width: 3ch;
+  text-align: center;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--faint);
+}
+
+.delta[data-dir="up"] {
+  color: var(--ok);
+}
+
+.delta[data-dir="down"] {
+  color: var(--danger);
 }
 
 .token {
@@ -107,11 +148,11 @@
 
 .sparkCol {
   flex: none;
-  width: 64px;
-  height: 16px;
+  width: 96px;
+  height: 20px;
 }
 
-.freq {
+.c5 {
   flex: none;
   width: 5ch;
   text-align: right;
@@ -119,12 +160,76 @@
   color: var(--muted);
 }
 
-.z {
+.mult {
   flex: none;
   width: 6ch;
   text-align: right;
   font-variant-numeric: tabular-nums;
   color: var(--text);
+}
+
+/* 급등 상태의 배수는 강조색 */
+.row[data-life="rising"] .mult {
+  color: var(--warn);
+}
+
+/* ── 라이프사이클 칩 — 신규·급등만 유채색, 유지·하강은 저채도 ── */
+
+.chipCol {
+  flex: none;
+  width: 40px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.chip {
+  display: inline-block;
+  padding: 1px 6px 2px;
+  border: 1px solid var(--line);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--faint);
+}
+
+.row[data-life="new"] .chip {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.row[data-life="rising"] .chip {
+  border-color: color-mix(in srgb, var(--warn) 55%, transparent);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: var(--warn);
+}
+
+.row[data-life="steady"] .chip {
+  color: var(--muted);
+}
+
+.row[data-life="falling"] .chip {
+  color: var(--faint);
+}
+
+/* ── 워밍업·빈 상태 ──────────────────────────────────────────────── */
+
+/* 급상승 탭 워밍업: 리스트 대신 학습 경과 한 줄 */
+.warmup {
+  display: none;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--warn);
+  white-space: nowrap;
+}
+
+.listWrap[data-warmup="true"] .warmup {
+  display: block;
 }
 
 .empty {
@@ -140,6 +245,27 @@
   color: var(--faint);
 }
 
-.listWrap[data-empty="false"] .empty {
+.listWrap[data-empty="false"] .empty,
+.listWrap[data-warmup="true"] .empty {
   display: none;
+}
+
+/* ── 하단 상태줄 — 값은 전부 워커 실측/실설정값 ─────────────────── */
+
+.statusBar {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  border-top: 1px solid var(--line);
+  padding-top: 5px;
+}
+
+.status {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

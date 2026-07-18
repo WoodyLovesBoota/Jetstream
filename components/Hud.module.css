@@ -1,13 +1,9 @@
+/* 우측 컬럼 하단에 고정 배치되는 계기판 — 플로팅이 아니므로 다른 패널을 가리지 않는다 */
 .hud {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 10;
-  min-width: 176px;
+  flex: none;
+  min-width: 0;
   padding: 9px 12px 10px;
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: var(--surface);
   border: 1px solid var(--line);
 }
 

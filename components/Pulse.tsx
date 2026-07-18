@@ -6,6 +6,7 @@ import "uplot/dist/uPlot.min.css";
 import type { GapMarker, SecondBucket, StreamSnapshot } from "@/lib/jetstream/protocol";
 import { isRenderPaused } from "@/lib/jetstream/renderGate";
 import { subscribeStream } from "@/lib/jetstream/useStreamWorker";
+import { TYPE_COLORS, withAlpha } from "@/lib/palette";
 import styles from "./Pulse.module.css";
 
 // Pulse는 React를 차트 컨테이너 마운트에만 쓴다. uPlot 인스턴스는 1회 생성 후
@@ -21,15 +22,14 @@ interface SeriesDef {
   color: string;
 }
 
-// post/like/repost/follow는 dataviz 카테고리컬 팔레트의 1-4번 슬롯(고정 순서).
-// "기타"는 잔여 합산값이라 정체성 색을 새로 소비하지 않고 --faint(회색)로 톤다운.
-// validate_palette.js로 이 앱의 실제 다크 표면(#0c141d) 대비 통과 확인함.
+// 시리즈 색은 게이지 셀과 같은 팔레트 상수(lib/palette.ts)에서 온다 —
+// 타입 ↔ 색 대응이 게이지·차트 어디서나 동일해야 한다.
 const SERIES: SeriesDef[] = [
-  { label: "post", collection: "app.bsky.feed.post", color: "#3987e5" },
-  { label: "like", collection: "app.bsky.feed.like", color: "#008300" },
-  { label: "repost", collection: "app.bsky.feed.repost", color: "#d55181" },
-  { label: "follow", collection: "app.bsky.graph.follow", color: "#c98500" },
-  { label: "other", collection: null, color: "#47586c" },
+  { label: "post", collection: "app.bsky.feed.post", color: TYPE_COLORS.post },
+  { label: "like", collection: "app.bsky.feed.like", color: TYPE_COLORS.like },
+  { label: "repost", collection: "app.bsky.feed.repost", color: TYPE_COLORS.repost },
+  { label: "follow", collection: "app.bsky.graph.follow", color: TYPE_COLORS.follow },
+  { label: "other", collection: null, color: TYPE_COLORS.other },
 ];
 
 // canvas는 CSS 커스텀 프로퍼티를 해석 못 한다 — app/globals.css 토큰값을 그대로 옮김
@@ -38,9 +38,11 @@ const GRID_STROKE = "#1c2836"; // --line
 const GAP_STROKE = "#e5484d"; // --danger — 아직 비어 있는 단절 구간
 const REPLAY_STROKE = "#4ba3ff"; // --accent — 되감기가 메운 구간
 
-function withAlpha(hex: string, alpha: number): string {
-  const n = parseInt(hex.slice(1), 16);
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+/** 우측 끝 현재값 라벨 사이에 확보하는 최소 세로 간격(px) */
+const EDGE_LABEL_GAP = 12;
+
+function setText(el: HTMLElement, text: string): void {
+  if (el.textContent !== text) el.textContent = text;
 }
 
 /** 버킷 슬라이스 → uPlot 누적(stacked) 시리즈. 한 번의 순회로 계산한다. */
@@ -68,6 +70,129 @@ function buildStackedData(buckets: SecondBucket[], windowSec: WindowSec): uPlot.
   }
 
   return [x, ...cum] as uPlot.AlignedData;
+}
+
+/** 누적 데이터에서 시리즈 s(0-기준)의 비누적 값과 밴드 경계를 꺼낸다 */
+function seriesValueAt(
+  data: uPlot.AlignedData,
+  s: number,
+  idx: number,
+): { v: number; cum: number; prev: number } {
+  const cum = (data[s + 1][idx] ?? 0) as number;
+  const prev = s === 0 ? 0 : ((data[s][idx] ?? 0) as number);
+  return { v: cum - prev, cum, prev };
+}
+
+/**
+ * 우측 끝 시리즈별 현재값 라벨. 마지막 칸은 진행 중인 부분 버킷이라 매초 0으로
+ * 떨어진다 — 그 앞(마지막 완결 버킷)의 값을 라벨로 쓴다. 위치는 해당 시리즈
+ * 밴드의 세로 중점이고, 겹치면 최소 간격을 확보하도록 밀어낸다.
+ */
+function updateEdgeLabels(u: uPlot, els: HTMLElement[]): void {
+  const data = u.data;
+  const idx = (data[0]?.length ?? 0) - 2;
+  if (idx < 0) {
+    for (const el of els) {
+      if (el.style.visibility !== "hidden") el.style.visibility = "hidden";
+    }
+    return;
+  }
+
+  const entries = els.map((el, s) => {
+    const { v, cum, prev } = seriesValueAt(data, s, idx);
+    return { el, v, y: u.valToPos((cum + prev) / 2, "y") };
+  });
+
+  // 겹침 방지 — 위→아래로 최소 간격을 벌리고, 아래로 넘친 만큼 위로 되민다.
+  // 플롯이 라벨 수 × 간격보다 낮으면 간격을 줄여서라도 플롯 안에 가둔다.
+  const h = u.over.clientHeight;
+  const gap = Math.min(EDGE_LABEL_GAP, Math.max(8, Math.floor((h - 8) / (els.length - 1))));
+  const sorted = [...entries].sort((a, b) => a.y - b.y);
+  let prevY = Number.NEGATIVE_INFINITY;
+  for (const e of sorted) {
+    e.y = Math.max(e.y, prevY + gap);
+    prevY = e.y;
+  }
+  let ceil = h - 4;
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    sorted[i].y = Math.min(sorted[i].y, ceil);
+    ceil = sorted[i].y - gap;
+  }
+
+  for (const e of entries) {
+    if (e.el.style.visibility !== "visible") e.el.style.visibility = "visible";
+    setText(e.el, String(e.v));
+    e.el.style.transform = `translateY(${Math.round(e.y - 6)}px)`;
+  }
+}
+
+// ── 호버 툴팁 — uPlot 내장 커서(idx)에 얹는 오버레이 ────────────────
+
+interface TooltipEls {
+  root: HTMLDivElement;
+  time: HTMLDivElement;
+  values: HTMLElement[];
+}
+
+function buildTooltip(over: HTMLElement): TooltipEls {
+  const root = document.createElement("div");
+  root.className = styles.tooltip;
+  root.hidden = true;
+
+  const time = document.createElement("div");
+  time.className = styles.tooltipTime;
+  root.appendChild(time);
+
+  const values = SERIES.map((def) => {
+    const row = document.createElement("div");
+    row.className = styles.tooltipRow;
+    const swatch = document.createElement("span");
+    swatch.className = styles.tooltipSwatch;
+    swatch.style.background = def.color;
+    const name = document.createElement("span");
+    name.className = styles.tooltipName;
+    name.textContent = def.label;
+    const val = document.createElement("span");
+    val.className = styles.tooltipVal;
+    val.textContent = "0";
+    row.append(swatch, name, val);
+    root.appendChild(row);
+    return val;
+  });
+
+  over.appendChild(root);
+  return { root, time, values };
+}
+
+function formatClock(sec: number): string {
+  const d = new Date(sec * 1000);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
+}
+
+function updateTooltip(u: uPlot, tip: TooltipEls): void {
+  const idx = u.cursor.idx;
+  const left = u.cursor.left ?? -1;
+  const top = u.cursor.top ?? -1;
+  if (idx == null || left < 0 || top < 0) {
+    if (!tip.root.hidden) tip.root.hidden = true;
+    return;
+  }
+  tip.root.hidden = false;
+
+  setText(tip.time, formatClock((u.data[0][idx] ?? 0) as number));
+  for (let s = 0; s < SERIES.length; s++) {
+    setText(tip.values[s], String(seriesValueAt(u.data, s, idx).v));
+  }
+
+  // 커서 우측 12px에 붙이되 우단에서는 좌측으로 플립 — offsetWidth 읽기는 호버 중에만
+  const w = tip.root.offsetWidth;
+  const h = tip.root.offsetHeight;
+  const x = left + 12 + w > u.over.clientWidth ? left - 12 - w : left + 12;
+  const y = Math.max(0, Math.min(top, u.over.clientHeight - h));
+  tip.root.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
 }
 
 /**
@@ -128,6 +253,7 @@ function buildOpts(
   height: number,
   fontFamily: string,
   getGaps: () => GapMarker[],
+  onCursor: (u: uPlot) => void,
 ): uPlot.Options {
   const axisFont = `11px ${fontFamily}`;
   const labelFont = `11px ${fontFamily}`;
@@ -158,26 +284,32 @@ function buildOpts(
     bands,
     legend: { show: false },
     // 갭 띠는 시리즈를 다 그린 뒤 위에 얹는다 — 낮은 알파라 아래 면적을 가리지 않는다
-    hooks: { draw: [(u) => drawGaps(u, getGaps(), fontFamily)] },
+    // 툴팁은 uPlot 내장 커서(크로스헤어·idx 스냅)의 setCursor 훅에 얹는다
+    hooks: {
+      draw: [(u) => drawGaps(u, getGaps(), fontFamily)],
+      setCursor: [onCursor],
+    },
     scales: {
       x: { time: true },
       y: { range: (_u, _min, max) => [0, max <= 0 ? 1 : max * 1.1] },
     },
+    // 낮은 밴드라 축은 최대한 얇게 — 단위(events/sec)는 패널 note가 이미 말한다
     axes: [
       {
         stroke: AXIS_STROKE,
         font: axisFont,
+        size: 22,
+        gap: 3,
         grid: { stroke: GRID_STROKE, width: 1 },
-        ticks: { stroke: GRID_STROKE, width: 1 },
+        ticks: { stroke: GRID_STROKE, width: 1, size: 6 },
       },
       {
         stroke: AXIS_STROKE,
-        font: axisFont,
+        font: labelFont,
+        size: 40,
+        gap: 3,
         grid: { stroke: GRID_STROKE, width: 1 },
-        ticks: { stroke: GRID_STROKE, width: 1 },
-        label: "events/sec",
-        labelFont,
-        labelSize: 16,
+        ticks: { stroke: GRID_STROKE, width: 1, size: 6 },
       },
     ],
   };
@@ -198,16 +330,32 @@ export default function Pulse() {
     // draw 훅은 최신 갭 목록을 그때그때 읽어야 한다 — 스냅샷마다 opts를 새로
     // 만들 수는 없으므로 이펙트 스코프의 변수를 게터로 넘긴다
     let gaps: GapMarker[] = [];
+    // 툴팁 DOM은 plot 생성 뒤에 만들어지므로 훅에는 게터 경유로 넘긴다
+    let tooltip: TooltipEls | null = null;
     const plot = new uPlot(
       buildOpts(
         Math.max(1, rect.width),
         Math.max(1, rect.height),
         fontFamily,
         () => gaps,
+        (u) => {
+          if (tooltip !== null) updateTooltip(u, tooltip);
+        },
       ),
       [[], [], [], [], [], []],
       wrap,
     );
+
+    // 우측 끝 현재값 라벨 — 시리즈당 하나, plot 오버레이(over)에 직접 얹는다
+    const edgeEls = SERIES.map((def) => {
+      const el = document.createElement("div");
+      el.className = styles.edgeLabel;
+      el.style.color = def.color;
+      el.style.visibility = "hidden";
+      plot.over.appendChild(el);
+      return el;
+    });
+    tooltip = buildTooltip(plot.over);
 
     let snapshot: StreamSnapshot | null = null;
     const unsubscribe = subscribeStream((s) => {
@@ -241,6 +389,7 @@ export default function Pulse() {
         lastWindow = windowRef.current;
         if (snapshot !== null) {
           plot.setData(buildStackedData(snapshot.buckets, lastWindow));
+          updateEdgeLabels(plot, edgeEls);
         }
       }
       raf = requestAnimationFrame(tick);

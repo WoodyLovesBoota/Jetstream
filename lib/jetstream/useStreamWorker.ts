@@ -9,6 +9,7 @@ import {
   type FilterMode,
   type MainToWorker,
   type StreamSnapshot,
+  type SurgeTuning,
   type WsState,
 } from "./protocol";
 
@@ -38,6 +39,14 @@ export function setFilterMode(mode: FilterMode): void {
   if (mode === filterMode) return;
   filterMode = mode;
   send({ type: "setFilter", wantedCollections: collectionsFor(mode) });
+}
+
+/**
+ * Surge 튜닝 파라미터 부분 교체 — 개발용 튜닝 패널이 부른다. 세션 한정이며
+ * 적용된 실제 값은 스냅샷의 surge.tuning으로 확인한다.
+ */
+export function sendSurgeTune(tuning: Partial<SurgeTuning>): void {
+  send({ type: "surgeTune", tuning });
 }
 
 /**
@@ -78,6 +87,7 @@ export function subscribeStream(listener: Listener): () => void {
         stall: (perFrameUs = 4_000, durationMs = 15_000) =>
           send({ type: "debug", action: "stall", perFrameUs, durationMs }),
         filter: (mode: FilterMode) => setFilterMode(mode),
+        surgeTune: (tuning: Partial<SurgeTuning>) => sendSurgeTune(tuning),
         pause: (next?: boolean) => setRenderPaused(next ?? !isRenderPaused()),
         disconnect: () => send({ type: "disconnect" }),
         connect: () =>
