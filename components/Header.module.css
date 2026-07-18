@@ -15,7 +15,7 @@
 
 .mark {
   margin: 0; /* h1 기본 마진 제거 — 표제 시맨틱만 취하고 배치는 그대로 */
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.32em;
@@ -28,7 +28,7 @@
 }
 
 .sub {
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 10px;
   letter-spacing: 0.22em;
   text-transform: uppercase;
@@ -51,7 +51,7 @@
   padding: 3px 11px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -123,7 +123,7 @@
   background: var(--surface);
   border: 1px solid var(--line);
   color: var(--muted);
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;

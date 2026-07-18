@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import { IBM_Plex_Sans, IBM_Plex_Mono, IBM_Plex_Sans_KR } from "next/font/google";
 import "./globals.css";
 
 const plexSans = IBM_Plex_Sans({
@@ -12,6 +12,17 @@ const plexMono = IBM_Plex_Mono({
   variable: "--font-mono",
   subsets: ["latin"],
   weight: ["400", "500", "600"],
+});
+
+// 한글 라벨("안정"·"신규"·"베이스라인 학습 중")용 폴백 — Plex Sans/Mono의 latin
+// 서브셋 밖이라 시스템 폰트로 떨어지던 글리프를 같은 Plex 계열로 받는다. 폰트
+// 체인에서 Plex 뒤에 서므로 라틴 글리프에는 관여하지 않고, preload: false라
+// 한글이 실제 등장할 때 unicode-range 슬라이스 단위로만 내려온다.
+const plexSansKR = IBM_Plex_Sans_KR({
+  variable: "--font-kr",
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  preload: false,
 });
 
 // og:image·canonical 같은 URL 필드는 배포 도메인이 정해지면 metadataBase와 함께 추가한다
@@ -44,7 +55,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ko" className={`${plexSans.variable} ${plexMono.variable}`}>
+    <html lang="ko" className={`${plexSans.variable} ${plexMono.variable} ${plexSansKR.variable}`}>
       <body>{children}</body>
     </html>
   );

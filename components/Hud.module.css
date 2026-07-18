@@ -22,14 +22,14 @@
 }
 
 .instance {
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 10px;
   color: var(--muted);
 }
 
 /* 측정 모드 표시 — 켜져 있을 때만 보인다. 점이 느리게 깜박여 "기록 중"임을 알린다 */
 .rec {
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.04em;
@@ -49,7 +49,7 @@
 
 .title {
   display: block;
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.22em;
@@ -69,7 +69,7 @@
   padding: 4px 7px;
   border-left: 2px solid currentColor;
   background: color-mix(in srgb, currentColor 10%, transparent);
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 10px;
   line-height: 1.45;
   white-space: nowrap;
@@ -112,14 +112,14 @@
 }
 
 .label {
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 11px;
   color: var(--muted);
 }
 
 .value {
   margin: 0;
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: var(--text);

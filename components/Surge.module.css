@@ -20,7 +20,7 @@
   border: 1px solid var(--line);
   background: transparent;
   padding: 3px 12px;
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 11px;
   letter-spacing: 0.06em;
   color: var(--muted);
@@ -58,7 +58,7 @@
   gap: 10px;
   padding: 4px 2px;
   border-bottom: 1px solid var(--line);
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -94,7 +94,7 @@
   height: 40px;
   padding: 0 2px;
   border-bottom: 1px solid var(--line);
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 12px;
   white-space: nowrap;
   transition: transform 400ms ease;
@@ -221,7 +221,7 @@
   left: 50%;
   transform: translate(-50%, -50%);
   margin: 0;
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 12px;
   letter-spacing: 0.08em;
   color: var(--warn);
@@ -238,7 +238,7 @@
   left: 50%;
   transform: translate(-50%, -50%);
   margin: 0;
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 11px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -261,7 +261,7 @@
 }
 
 .status {
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: var(--muted);

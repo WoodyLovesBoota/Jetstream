@@ -15,7 +15,7 @@
 }
 
 .status {
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: var(--muted);
@@ -58,7 +58,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 11px;
   /* 행 높이가 밭을 때 줄상자가 행을 밀어내지 않도록 */
   line-height: 1;
@@ -121,7 +121,7 @@
   left: 50%;
   transform: translate(-50%, -50%);
   margin: 0;
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 11px;
   letter-spacing: 0.14em;
   text-transform: uppercase;

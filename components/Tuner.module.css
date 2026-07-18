@@ -20,7 +20,7 @@
 }
 
 .title {
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.22em;
@@ -28,7 +28,7 @@
 }
 
 .hint {
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 9px;
   color: var(--faint);
 }
@@ -47,7 +47,7 @@
 }
 
 .label {
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 10px;
   color: var(--muted);
   white-space: nowrap;
@@ -59,7 +59,7 @@
   border: 1px solid var(--line);
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -75,7 +75,7 @@
   margin: 8px 0 0;
   padding-top: 6px;
   border-top: 1px solid var(--line);
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 9px;
   line-height: 1.5;
   color: var(--faint);
