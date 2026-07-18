@@ -9,6 +9,14 @@ import {
 } from "@/lib/jetstream/renderGate";
 import { subscribeStream } from "@/lib/jetstream/useStreamWorker";
 import { createFrameTimeMeter } from "@/lib/perf/frameTime";
+import {
+  isMeasuring,
+  measurement,
+  startMeasurement,
+  stopMeasurement,
+  subscribeMeasurement,
+  toggleMeasurement,
+} from "@/lib/perf/measurement";
 import styles from "./Hud.module.css";
 
 // HUD는 React를 마운트에만 쓴다. 이후의 모든 갱신은 rAF 루프가 값 노드의
@@ -86,6 +94,7 @@ function connText(conn: StreamSnapshot["conn"]): string {
 export default function Hud() {
   const valueEls = useRef<Partial<Record<RowKey, HTMLElement>>>({});
   const instRef = useRef<HTMLSpanElement | null>(null);
+  const recRef = useRef<HTMLSpanElement | null>(null);
   const rootRef = useRef<HTMLElement | null>(null);
   const degradedRef = useRef<HTMLParagraphElement | null>(null);
   const degradedDetailRef = useRef<HTMLSpanElement | null>(null);
@@ -117,6 +126,19 @@ export default function Hud() {
     let gapIdx = 0;
     let gapCount = 0;
     let lastArrival = NaN;
+    // 측정 모드 피드용 — 프레임 간격 계산과 초 단위 표본 중복 방지
+    let prevFrameNow = NaN;
+    let lastMeasureSec = -1;
+
+    const recEl = recRef.current;
+    const paintRec = () => {
+      if (recEl === null) return;
+      const on = isMeasuring();
+      recEl.hidden = !on;
+      root.dataset.measuring = String(on);
+    };
+    paintRec();
+    const unsubscribeMeasure = subscribeMeasurement(paintRec);
 
     const unsubscribe = subscribeStream((s) => {
       snapshot = s;
@@ -133,6 +155,8 @@ export default function Hud() {
     const onVisibilityChange = () => {
       meter.reset();
       lastArrival = NaN;
+      prevFrameNow = NaN;
+      lastMeasureSec = -1;
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
 
@@ -150,11 +174,45 @@ export default function Hud() {
     let raf = requestAnimationFrame(function tick(now) {
       meter.sample(now);
 
+      // ── 측정 모드 피드 ──
+      // 프레임 간격은 매 틱, 초 단위 실측치(전부 스냅샷에서 온 값)는 벽시계 초가
+      // 바뀔 때 한 번. 비활성이면 레코더가 스스로 무시하므로 오버헤드는 함수 호출뿐.
+      const rec = measurement();
+      if (rec.active()) {
+        rec.noteFrame(now, Number.isNaN(prevFrameNow) ? 0 : now - prevFrameNow);
+        const sec = Math.floor(now / 1000);
+        if (sec !== lastMeasureSec && snapshot !== null) {
+          lastMeasureSec = sec;
+          const c = snapshot.counters;
+          const bp = snapshot.backpressure;
+          const su = snapshot.surgeStats;
+          rec.noteSecond(now, {
+            recvPerSec: c.recvPerSec,
+            procPerSec: c.procPerSec,
+            dropPerSec: c.dropPerSec,
+            m: bp.m,
+            loadPct: bp.loadPct,
+            lagMs: bp.lagMs,
+            degraded: bp.degraded,
+            filter: snapshot.conn.filter,
+            surgeTracked: su.tracked,
+            surgeCap: su.cap,
+            surgeEvicted: su.evicted,
+            surgeDropped: su.dropped,
+            tapeStrideN: snapshot.tapeStats.strideN,
+            tuning: snapshot.surge.tuning,
+          });
+        }
+      }
+      prevFrameNow = now;
+
       if (now >= nextTextAt) {
         nextTextAt = now + TEXT_INTERVAL_MS;
 
         const p95 = meter.percentile(0.95);
         setText(els.frame, Number.isNaN(p95) ? "—" : `${p95.toFixed(1)}ms`);
+
+        if (recEl !== null && rec.active()) setText(recEl, `● REC ${rec.windowCount()}w`);
 
         if (gapCount > 0) {
           let sum = 0;
@@ -221,8 +279,40 @@ export default function Hud() {
       cancelAnimationFrame(raf);
       unsubscribe();
       unsubscribePause();
+      unsubscribeMeasure();
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
+  }, []);
+
+  // 측정 모드 토글 — "m" 키(입력 필드 밖에서만) + dev 전역 핸들.
+  // 전역 핸들은 verify 하니스(headless)가 호출한다:
+  //   __jetstreamMeasureCtl.start("throttle-6x-full", { throttleRate: 6 })
+  //   __jetstreamMeasureCtl.json()   → 60초 창 통계 JSON 문자열
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "m" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t !== null && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable))
+        return;
+      toggleMeasurement(`manual-${new Date().toISOString().slice(11, 19)}`);
+    };
+    window.addEventListener("keydown", onKey);
+
+    if (process.env.NODE_ENV !== "production") {
+      (globalThis as Record<string, unknown>).__jetstreamMeasureCtl = {
+        start: (scenario = "manual", meta?: Record<string, unknown>) =>
+          startMeasurement(scenario, meta),
+        stop: () => stopMeasurement(),
+        toggle: (scenario = "manual", meta?: Record<string, unknown>) =>
+          toggleMeasurement(scenario, meta),
+        reset: () => measurement().reset(),
+        status: () => ({ measuring: measurement().active(), windows: measurement().windowCount() }),
+        export: () => measurement().export(),
+        json: () => JSON.stringify(measurement().export(), null, 2),
+      };
+    }
+
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   return (
@@ -236,9 +326,15 @@ export default function Hud() {
     >
       <div className={styles.head}>
         <span className={styles.title}>HUD</span>
-        {/* 붙어 있는 인스턴스 — 페일오버가 일어나면 여기가 바뀐다 */}
-        <span className={styles.instance} ref={instRef} data-instance>
-          —
+        <span className={styles.headRight}>
+          {/* 측정 모드 표시 — "m" 키/하니스로 켤 때만 보인다(닫힌 창 수를 함께 센다) */}
+          <span className={styles.rec} ref={recRef} data-rec hidden>
+            ● REC
+          </span>
+          {/* 붙어 있는 인스턴스 — 페일오버가 일어나면 여기가 바뀐다 */}
+          <span className={styles.instance} ref={instRef} data-instance>
+            —
+          </span>
         </span>
       </div>
       {/*

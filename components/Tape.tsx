@@ -118,7 +118,14 @@ export default function Tape() {
           </button>
         )}
       </div>
-      <div className={styles.scrollArea} ref={scrollRef} onScroll={handleScroll}>
+      {/* data-rows: 메인 스레드 테이프 링의 현재 행 수 — TAPE_MAX_ROWS(2000) 상한이
+          실제로 멈추는지 검증하는 관측점. 렌더 시점에 이미 있는 값이라 비용 없음. */}
+      <div
+        className={styles.scrollArea}
+        ref={scrollRef}
+        onScroll={handleScroll}
+        data-rows={rows.length}
+      >
         {rows.length === 0 ? (
           <p className={styles.empty}>awaiting samples…</p>
         ) : (

@@ -15,10 +15,36 @@
   margin-bottom: 6px;
 }
 
+.headRight {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
 .instance {
   font-family: var(--font-mono), monospace;
   font-size: 10px;
   color: var(--muted);
+}
+
+/* 측정 모드 표시 — 켜져 있을 때만 보인다. 점이 느리게 깜박여 "기록 중"임을 알린다 */
+.rec {
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--danger);
+  animation: recPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes recPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
 }
 
 .title {
