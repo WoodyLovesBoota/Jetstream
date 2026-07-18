@@ -26,7 +26,8 @@ description: Jetstream Deck 변경을 실제 브라우저에서 구동해 검증
 - dev 전용 전역 핸들: `globalThis.__jetstream` = 최신 `StreamSnapshot`
   (`{ ts, buckets[300], counters: { recvTotal, recvPerSec, procTotal, procPerSec, dropTotal, dropPerSec, parseErrors }, wsState }`) —
   `lib/jetstream/useStreamWorker.ts`의 dev 블록이 제공. (P1의 1Hz 콘솔 로그는 P2에서 제거됨)
-- HUD(P2): `aside[aria-label="diagnostics"]`의 `dd` 노드들 — 순서대로
+- HUD(P2, R1에서 플로팅 → 우측 컬럼 하단 고정): `aside[aria-label="diagnostics"]`의
+  `dd` 노드들 — 순서대로
   recv/s, proc/s, drop/s, **cols 10s**, tokens, tok evict, tok drop, snap(ms), frame p95(ms), ws(=`dd`[9]).
   (P8에서 `cols 10s`가 인덱스 3에 끼어들어 그 뒤가 한 칸씩 밀렸다.)
   rAF 루프가 textContent를 직접 갱신하므로 값 변화 관찰은 두 시점 텍스트 비교로 한다.
@@ -34,12 +35,37 @@ description: Jetstream Deck 변경을 실제 브라우저에서 구동해 검증
   `live/replaying`이면 마지막 이벤트의 지연, `reconnecting/failed`면 다음 시도까지 남은 대기.
   현재 인스턴스는 별도 행이 아니라 HUD 제목 줄의 `[data-instance]`에 있다(예: `js2.us-east`).
 - 메인 스레드 부하: `PerformanceObserver({ entryTypes: ["longtask"] })`로 롱태스크 카운트 (기대값 0).
-- Surge(P5): `globalThis.__jetstream.surge` = z 내림차순 상위 20개 `{token, freq, z, spark[60]}`,
-  `.surgeStats` = `{tracked, cap, active, evicted, dropped, ttlSec}`. DOM은
-  `section[aria-label="Surge"] li[data-filled="true"]` 행(`data-token`, `data-new`);
-  각 행의 `canvas`가 스파크라인(픽셀 alpha!=0으로 렌더 확인). HUD의 tokens/tok evict/tok drop
-  dd 노드가 테이블 통제 카운터. 소크: 지속 유입에서 `tracked`가 `cap`(50k) 아래에서 안정화되고
-  `evicted`가 증가하며 `dropped`는 0에 머무는지 확인 — 상한 안정화의 실측 근거.
+- Surge(P5 → R3/R4 재설계): `globalThis.__jetstream.surge` =
+  `{surging[≤10], sustained[≤10], baselineWarmup: {active, elapsedSec}, tuning, lastResortSec}`.
+  각 항목은 `{token, count1m, count5m, count15m, mult, spark[30], rankDelta(null=신규), lifecycle}`.
+  **불변식**: count1m ≤ count5m ≤ count15m, Σspark === count15m, spark 길이 30.
+  `.surgeStats` = `{tracked, cap, active, evicted, dropped, ttlSec}`은 그대로.
+  - **재정렬 주기**: 리스트 순서는 `lastResortSec`이 바뀌는 틱에서만 바뀌어야 한다
+    (기본 5초 간격). 스코어·카운트는 스냅샷마다 갱신된다.
+  - **워밍업**: 세션 첫 120초는 `baselineWarmup.active === true`이고 `surging`이 비어
+    있어야 하며(급상승 탭에 "베이스라인 학습 중" 문구), `sustained`는 정상 동작.
+  - **체류**: 리스트에 들어온 토큰은 30초(tuning.minDwellSec) 안에 사라지면 안 된다
+    (데이터 소멸 제외 — 최초 채움 항목 포함).
+  - **DOM**: `section[aria-label="Surge"]`의 `[role="tab"]` 2개(급상승/지속),
+    `li[data-filled="true"]` 행(`data-token`, `data-life`, style.transform=translateY(순위×40px),
+    transition 400ms — FLIP은 같은 li 노드가 transform만 바꾸는 것으로 확인).
+  - **튜닝 패널(dev)**: "t" 키 토글 → `aside[aria-label="Surge tuner"]`, 입력 7개.
+    콘솔에서는 `__jetstreamDebug.surgeTune({deadbandPct: 0, ...})`. 적용값은
+    스냅샷 `surge.tuning`으로 되돌아온다(세션 한정).
+  - 소크: 지속 유입에서 `tracked`가 `cap`(50k) 아래에서 안정화되고 `evicted`가
+    증가하며 `dropped`는 0에 머무는지 확인 — 상한 안정화의 실측 근거.
+
+- Gauges(R2): `globalThis.__jetstream.gauges` = `{sec, stats: {post|like|repost|follow:
+  {partial, ema, p95, avg60}}}`. DOM은 `section[aria-label="Gauges"] [data-type]` 셀 4개 —
+  `[data-cell="fill"]`(transform: scaleY 0..1, 1초 경계에서 80ms 플러시 후 재충전),
+  `[data-cell="value"]`(3초 EMA — 연속 표본 간 점프가 작아야 한다),
+  `[data-cell="delta"]`(`data-dir` up/down/flat, |3%| 미만은 "안정").
+  셀 색(`--type-color`)과 차트 시리즈 색은 `lib/palette.ts` 한 곳에서 와 일치해야 한다.
+
+- Pulse 차트 개선(R2): 우측 끝 `[class*="edgeLabel"]` 5개(시리즈별 현재값 — 마지막
+  완결 버킷, 시리즈 색). 호버 툴팁은 `.u-over` 위 마우스 이동으로 확인하되
+  **단일 mouse.move는 진입 이벤트를 못 만든다** — `mouse.move(..., {steps: 5})`로
+  움직여야 `[class*="__tooltip"]`이 `hidden=false`가 된다. 값은 시각 + 시리즈 5행.
 
 - Mix(P6): `globalThis.__jetstream.buckets[i].langs`(언어 → post 수) / `.noLangs`.
   DOM은 `section[aria-label="Mix"]`의 `[data-total]`(60초 표본 수)과
@@ -76,6 +102,30 @@ description: Jetstream Deck 변경을 실제 브라우저에서 구동해 검증
     기본 필터가 이미 파이어호스의 ~89%라 +12%뿐이고 요동에 묻힌다(ARCHITECTURE §9).
     관측점은 HUD의 `cols 10s`(6 → 25~29). 의도된 재연결이라 `gaps`는 비어 있어야 하고,
     커서 재사용이므로 `replaySkipped`가 늘어난다.
+
+- 측정 모드(P9): `globalThis.__jetstreamMeasureCtl` — dev 빌드 전용, HUD가 마운트하며 붙인다.
+  `start(scenario, meta)` / `stop()` / `status()` / `export()` / `json()` / `reset()`.
+  화면 토글은 **"m" 키**(입력 필드 밖에서만)이고, 켜지면 HUD 머리줄에 `[data-rec]`
+  (`● REC 3w` — 닫힌 창 수)가 뜨며 HUD 루트에 `data-measuring="true"`가 붙는다.
+  - **집계 방식**: HUD의 rAF 루프가 프레임 간격을 매 틱, 스냅샷 실측 카운터를 벽시계
+    초마다 `lib/perf/measurement.ts`의 레코더에 먹인다. 60초마다 창을 닫아
+    `recvPerSec/procPerSec/dropPerSec`의 min·p50·avg·p95·max, `frameMs`의 p50·p95·p99·max·n,
+    `degraded`(초 수·비율·maxM·maxLoadPct·maxLagMs), `caps`(surge tracked/evict/drop 델타,
+    tape stride)를 산출한다. `export()`는 진행 중인 창까지 포함해 돌려준다.
+  - 창 롤오버는 `performance.now()` 기준이라 **CPU 스로틀링에 영향받지 않는다**(60초는 실제 60초).
+  - 프레임 표본은 2s 이상 간격만 제외한다(rAF가 통째로 디스케줄된 구간). 탭 백그라운딩은
+    HUD가 `visibilitychange`에서 리셋해 애초에 표본에 들어오지 않는다.
+  - `export().tuning`은 워커가 **실제 적용 중인** Surge 튜닝값이고, 세션 중 바뀌면
+    `tuningChanged: true`가 된다 — 튜닝 대조 실험의 증거로 쓴다.
+
+- 상태 오버레이(P9, `components/DeckStatus.tsx`): `[role="status"][data-mode]` —
+  `connecting`(최초 연결 전 빈 상태) / `failed`(지속 장애 에러 상태) **두 상태에서만** 뜬다.
+  `reconnecting`은 짧고 패널이 직전 데이터를 얼린 채 배지·HUD가 이미 알리므로 **덮지 않는다**
+  (검증 시 `drop()` 직후 `data-mode`가 `null`인 것이 정상). `pointer-events: none`이라
+  헤더 컨트롤을 가두지 않는다 — 오버레이가 떠 있어도 버튼 클릭이 통과해야 한다.
+
+- Tape 상한 관측점(P9): `[data-rows]`(스크롤 영역) = 메인 스레드 테이프 링의 현재 행 수.
+  `TAPE_MAX_ROWS`(2000)에 닿은 뒤 그 값에서 멈추는지가 상한 검증의 직접 증거다.
 
 ## 알려진 함정
 

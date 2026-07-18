@@ -1,0 +1,198 @@
+{
+  "pass": 32,
+  "total": 32,
+  "results": [
+    {
+      "step": 0,
+      "label": "빈 상태 오버레이(connecting)",
+      "ok": true,
+      "detail": "\"connecting\""
+    },
+    {
+      "step": 0,
+      "label": "연결되면 오버레이가 사라진다",
+      "ok": true,
+      "detail": "veil=false"
+    },
+    {
+      "step": 1,
+      "label": "배지 live",
+      "ok": true,
+      "detail": "live"
+    },
+    {
+      "step": 1,
+      "label": "게이지 4셀",
+      "ok": true,
+      "detail": "4셀, fill=scaleY(0.6327)"
+    },
+    {
+      "step": 1,
+      "label": "Pulse canvas 존재",
+      "ok": true,
+      "detail": "11개"
+    },
+    {
+      "step": 1,
+      "label": "Tape 행 유입",
+      "ok": true,
+      "detail": "204행"
+    },
+    {
+      "step": 1,
+      "label": "Mix 표본",
+      "ok": true,
+      "detail": "n=482"
+    },
+    {
+      "step": 1,
+      "label": "HUD recv/s 실측",
+      "ok": true,
+      "detail": "recv/s=390 hud[0]=391"
+    },
+    {
+      "step": 2,
+      "label": "conn.filter가 full",
+      "ok": true,
+      "detail": "full / 버튼=\"full stream\""
+    },
+    {
+      "step": 2,
+      "label": "cols 10s 증가 (관측점)",
+      "ok": true,
+      "detail": "6 → 20"
+    },
+    {
+      "step": 2,
+      "label": "의도된 재연결이라 갭 없음",
+      "ok": true,
+      "detail": "0 → 0"
+    },
+    {
+      "step": 2,
+      "label": "커서 재사용(replaySkipped 증가)",
+      "ok": true,
+      "detail": "0 → 2116"
+    },
+    {
+      "step": 3,
+      "label": "reconnecting 진입",
+      "ok": true,
+      "detail": "reconnecting attempt=3"
+    },
+    {
+      "step": 3,
+      "label": "백오프 대기 표시",
+      "ok": true,
+      "detail": "retryInMs=711"
+    },
+    {
+      "step": 3,
+      "label": "열린 갭 마커 생성",
+      "ok": true,
+      "detail": "gaps=1 open=true"
+    },
+    {
+      "step": 3,
+      "label": "recv/s 0으로",
+      "ok": true,
+      "detail": "recv/s=0"
+    },
+    {
+      "step": 4,
+      "label": "재연결 성공",
+      "ok": true,
+      "detail": "state=replaying reconnects=1"
+    },
+    {
+      "step": 4,
+      "label": "갭이 닫힘",
+      "ok": true,
+      "detail": "closed=1/1"
+    },
+    {
+      "step": 4,
+      "label": "되감기가 갭을 메움(replayed)",
+      "ok": true,
+      "detail": "[true]"
+    },
+    {
+      "step": 4,
+      "label": "lag이 0으로 수렴",
+      "ok": true,
+      "detail": "lagSec=0.100929 state=live"
+    },
+    {
+      "step": 5,
+      "label": "배너가 100ms 페인트 주기 안에 반영",
+      "ok": true,
+      "detail": "3s 내 반영"
+    },
+    {
+      "step": 5,
+      "label": "degraded 진입",
+      "ok": true,
+      "detail": "M=4 load=372%"
+    },
+    {
+      "step": 5,
+      "label": "배너 노출",
+      "ok": true,
+      "detail": "\"degradedparsing 1 in 4 · load 372%\""
+    },
+    {
+      "step": 5,
+      "label": "HUD data-degraded",
+      "ok": true,
+      "detail": "true"
+    },
+    {
+      "step": 5,
+      "label": "drop/s 급등",
+      "ok": true,
+      "detail": "48 → 194"
+    },
+    {
+      "step": 5,
+      "label": "복귀도 페인트 주기 안에 반영",
+      "ok": true,
+      "detail": "3s 내 반영"
+    },
+    {
+      "step": 5,
+      "label": "자동 복귀",
+      "ok": true,
+      "detail": "M=1"
+    },
+    {
+      "step": 5,
+      "label": "배너 사라짐",
+      "ok": true,
+      "detail": "hidden=true"
+    },
+    {
+      "step": 6,
+      "label": "'m' 키로 측정 모드 on",
+      "ok": true,
+      "detail": "attr=true"
+    },
+    {
+      "step": 6,
+      "label": "REC 표시",
+      "ok": true,
+      "detail": "\"● REC 1w\""
+    },
+    {
+      "step": 6,
+      "label": "'m' 키로 off",
+      "ok": true,
+      "detail": "measuring=false"
+    },
+    {
+      "step": 9,
+      "label": "페이지 에러 없음",
+      "ok": true,
+      "detail": "none"
+    }
+  ]
+}

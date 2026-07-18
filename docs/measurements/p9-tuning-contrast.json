@@ -1,0 +1,89 @@
+{
+  "note": "같은 실스트림 위 동일 길이 두 구간. A는 R3 안정화 장치(데드밴드·최소 체류·재정렬 주기)를 끈 상태, B는 확정값. 순위 변동은 급상승 top-10을 1초 간격으로 표본한 것.",
+  "phaseSec": 180,
+  "filter": "filtered (default)",
+  "phases": [
+    {
+      "label": "A-stabilizers-off",
+      "requested": {
+        "deadbandPct": 0,
+        "minDwellSec": 0,
+        "resortSec": 1
+      },
+      "applied": {
+        "alpha": 2,
+        "minSupport": 30,
+        "deadbandPct": 0,
+        "minDwellSec": 0,
+        "enterMult": 2,
+        "exitMult": 1.4,
+        "resortSec": 1
+      },
+      "surging": {
+        "samples": 180,
+        "comparedPairs": 179,
+        "minutes": 2.99,
+        "reorderEventsObserved": 178,
+        "samplesWithAnyChange": 119,
+        "positionChanges": 280,
+        "entries": 44,
+        "exits": 44,
+        "positionChangesPerMin": 93.6,
+        "turnoverPerMin": 29.4
+      },
+      "sustained": {
+        "samples": 180,
+        "comparedPairs": 179,
+        "minutes": 2.99,
+        "reorderEventsObserved": 178,
+        "samplesWithAnyChange": 20,
+        "positionChanges": 36,
+        "entries": 4,
+        "exits": 4,
+        "positionChangesPerMin": 12,
+        "turnoverPerMin": 2.7
+      }
+    },
+    {
+      "label": "B-confirmed",
+      "requested": {
+        "deadbandPct": 15,
+        "minDwellSec": 30,
+        "resortSec": 5
+      },
+      "applied": {
+        "alpha": 2,
+        "minSupport": 30,
+        "deadbandPct": 15,
+        "minDwellSec": 30,
+        "enterMult": 2,
+        "exitMult": 1.4,
+        "resortSec": 5
+      },
+      "surging": {
+        "samples": 180,
+        "comparedPairs": 179,
+        "minutes": 2.99,
+        "reorderEventsObserved": 37,
+        "samplesWithAnyChange": 19,
+        "positionChanges": 29,
+        "entries": 26,
+        "exits": 26,
+        "positionChangesPerMin": 9.7,
+        "turnoverPerMin": 17.4
+      },
+      "sustained": {
+        "samples": 180,
+        "comparedPairs": 179,
+        "minutes": 2.99,
+        "reorderEventsObserved": 37,
+        "samplesWithAnyChange": 3,
+        "positionChanges": 8,
+        "entries": 0,
+        "exits": 0,
+        "positionChangesPerMin": 2.7,
+        "turnoverPerMin": 0
+      }
+    }
+  ]
+}
