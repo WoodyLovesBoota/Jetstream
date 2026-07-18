@@ -1,0 +1,55 @@
+/* 에러 바운더리 폴백 — DeckStatus의 계기판 언어를 따르되 결함(danger) 톤 고정 */
+
+.veil {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 36px;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  text-align: center;
+}
+
+.label {
+  margin: 0;
+  font-family: var(--font-mono), monospace;
+  font-size: 13px;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--danger);
+}
+
+.detail {
+  margin: 0;
+  max-width: 48ch;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.btn {
+  margin-top: 6px;
+  padding: 4px 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.btn:hover {
+  color: var(--text);
+  border-color: var(--tick);
+}

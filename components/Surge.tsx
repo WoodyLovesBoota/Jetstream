@@ -104,6 +104,8 @@ function drawSpark(ctx: CanvasRenderingContext2D, spark: number[], rising: boole
 export default function Surge() {
   const [tab, setTab] = useState<Tab>("surging");
   const tabRef = useRef<Tab>("surging");
+  const surgingTabRef = useRef<HTMLButtonElement | null>(null);
+  const sustainedTabRef = useRef<HTMLButtonElement | null>(null);
   const listRef = useRef<HTMLOListElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const warmupRef = useRef<HTMLParagraphElement | null>(null);
@@ -302,14 +304,33 @@ export default function Surge() {
     setTab(next);
   }
 
+  // ARIA 탭 패턴: 방향키로 탭 이동 + 포커스 동행(roving tabindex). 탭이 둘뿐이라
+  // 좌우 어느 쪽이든 "다른 탭"으로 간다.
+  function handleTablistKey(e: React.KeyboardEvent): void {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const next: Tab = tab === "surging" ? "sustained" : "surging";
+    switchTab(next);
+    (next === "surging" ? surgingTabRef : sustainedTabRef).current?.focus();
+  }
+
   return (
     <div className={styles.root}>
-      <div className={styles.tabs} role="tablist" aria-label="Surge 리스트">
+      <div
+        className={styles.tabs}
+        role="tablist"
+        aria-label="Surge 리스트"
+        onKeyDown={handleTablistKey}
+      >
         <button
           type="button"
           role="tab"
+          id="surge-tab-surging"
+          aria-controls="surge-tabpanel"
           className={styles.tab}
           aria-selected={tab === "surging"}
+          tabIndex={tab === "surging" ? 0 : -1}
+          ref={surgingTabRef}
           onClick={() => switchTab("surging")}
         >
           급상승 · 5분
@@ -317,14 +338,26 @@ export default function Surge() {
         <button
           type="button"
           role="tab"
+          id="surge-tab-sustained"
+          aria-controls="surge-tabpanel"
           className={styles.tab}
           aria-selected={tab === "sustained"}
+          tabIndex={tab === "sustained" ? 0 : -1}
+          ref={sustainedTabRef}
           onClick={() => switchTab("sustained")}
         >
           지속 · #태그
         </button>
       </div>
-      <div className={styles.listWrap} ref={wrapRef} data-empty="true" data-warmup="false">
+      <div
+        className={styles.listWrap}
+        ref={wrapRef}
+        id="surge-tabpanel"
+        role="tabpanel"
+        aria-labelledby={tab === "surging" ? "surge-tab-surging" : "surge-tab-sustained"}
+        data-empty="true"
+        data-warmup="false"
+      >
         <div className={styles.colHead} aria-hidden="true">
           <span className={styles.rank}>#</span>
           <span className={styles.delta}>Δ</span>

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { SURGE_TUNING_DEFAULTS, type SurgeTuning } from "@/lib/jetstream/protocol";
 import { sendSurgeTune, subscribeStream } from "@/lib/jetstream/useStreamWorker";
+import { isPlainHotkey } from "@/lib/dom";
 import styles from "./Tuner.module.css";
 
 // Surge 튜닝 패널 — 개발 모드 전용 숨김 패널. 키보드 "t"로 토글한다.
@@ -28,6 +29,14 @@ const FIELDS: FieldDef[] = [
 ];
 
 export default function Tuner() {
+  // 빌드 타임 상수 가드는 훅 **앞**이어야 한다 — 뒤에 두면 프로덕션에서도 "t" 키
+  // 리스너가 등록되고, 토글 시 화면에 없는 채로 스트림 구독까지 걸린다(실제로 그랬다).
+  // 정적 import라 코드 자체는 번들에 남는다 — 사라지는 것은 실행이지 바이트가 아니다.
+  if (process.env.NODE_ENV === "production") return null;
+  return <TunerPanel />;
+}
+
+function TunerPanel() {
   const [open, setOpen] = useState(false);
   const [values, setValues] = useState<SurgeTuning>({ ...SURGE_TUNING_DEFAULTS });
   const appliedRef = useRef<HTMLParagraphElement | null>(null);
@@ -35,10 +44,7 @@ export default function Tuner() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "t" || e.metaKey || e.ctrlKey || e.altKey) return;
-      const t = e.target as HTMLElement | null;
-      if (t !== null && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable))
-        return;
+      if (!isPlainHotkey(e, "t")) return;
       setOpen((prev) => !prev);
     };
     window.addEventListener("keydown", onKey);
