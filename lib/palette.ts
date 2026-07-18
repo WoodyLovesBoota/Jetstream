@@ -10,7 +10,9 @@ export const TYPE_COLORS = {
   like: "#008300",
   repost: "#d55181",
   follow: "#c98500",
-  other: "#47586c",
+  // 잔여 합산값 — 정체성 색을 소비하지 않고 --faint(회색)로 톤다운. --faint와 같은
+  // 값으로 맞춰(P9) 우측 엣지 라벨 텍스트도 3:1 대비를 넘긴다.
+  other: "#5a6e88",
 } as const;
 
 export type TypeColorKey = keyof typeof TYPE_COLORS;

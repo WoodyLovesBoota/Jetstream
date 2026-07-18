@@ -1,3 +1,4 @@
+import DeckStatus from "@/components/DeckStatus";
 import Gauges from "@/components/Gauges";
 import Header from "@/components/Header";
 import Tuner from "@/components/Tuner";
@@ -34,6 +35,8 @@ export default function Home() {
           <Hud />
         </div>
       </main>
+      {/* 연결 전(빈 상태)·지속 장애(에러 상태)를 계기판 언어로 덮는 앰비언트 레이어 */}
+      <DeckStatus />
       {/* 개발 전용 Surge 튜닝 패널 — "t" 키로 토글, 프로덕션에선 렌더되지 않는다 */}
       <Tuner />
     </div>
