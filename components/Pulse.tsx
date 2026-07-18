@@ -6,6 +6,7 @@ import "uplot/dist/uPlot.min.css";
 import type { GapMarker, SecondBucket, StreamSnapshot } from "@/lib/jetstream/protocol";
 import { isRenderPaused } from "@/lib/jetstream/renderGate";
 import { subscribeStream } from "@/lib/jetstream/useStreamWorker";
+import { setText } from "@/lib/dom";
 import { TYPE_COLORS, withAlpha } from "@/lib/palette";
 import styles from "./Pulse.module.css";
 
@@ -40,10 +41,6 @@ const REPLAY_STROKE = "#4ba3ff"; // --accent — 되감기가 메운 구간
 
 /** 우측 끝 현재값 라벨 사이에 확보하는 최소 세로 간격(px) */
 const EDGE_LABEL_GAP = 12;
-
-function setText(el: HTMLElement, text: string): void {
-  if (el.textContent !== text) el.textContent = text;
-}
 
 /** 버킷 슬라이스 → uPlot 누적(stacked) 시리즈. 한 번의 순회로 계산한다. */
 function buildStackedData(buckets: SecondBucket[], windowSec: WindowSec): uPlot.AlignedData {

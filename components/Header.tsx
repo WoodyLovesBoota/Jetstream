@@ -22,9 +22,10 @@ export default function Header() {
   return (
     <header className={styles.header}>
       <div className={styles.brand}>
-        <span className={styles.mark}>
+        {/* 페이지 유일의 h1 — 패널 이름(h2)들의 상위 표제. 스타일은 .mark가 전담한다 */}
+        <h1 className={styles.mark}>
           JET<span className={styles.markDot}>·</span>STREAM
-        </span>
+        </h1>
         <span className={styles.sub}>bluesky firehose deck</span>
       </div>
       <div className={styles.controls}>

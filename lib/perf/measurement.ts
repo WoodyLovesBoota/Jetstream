@@ -230,6 +230,35 @@ export function createMeasurementRecorder(): MeasurementRecorder {
     };
   }
 
+  /** 열린 창 하나를 MeasureWindow 요약으로 — closeWindow와 export가 공유한다 */
+  function summarize(w: OpenWindow): MeasureWindow {
+    const evictDelta = Number.isNaN(w.evictAtOpen) ? 0 : w.evictLatest - w.evictAtOpen;
+    const dropDelta = Number.isNaN(w.dropAtOpen) ? 0 : w.dropLatest - w.dropAtOpen;
+    const seconds = w.recv.length;
+    return {
+      index: w.index,
+      atSec: r((w.startNow - startNow) / 1000, 0),
+      seconds,
+      recvPerSec: roundStat(stat5(w.recv)),
+      procPerSec: roundStat(stat5(w.proc)),
+      dropPerSec: roundStat(stat5(w.drop)),
+      frameMs: roundFrame(frameStat(w.frames)),
+      degraded: {
+        seconds: w.degradedSeconds,
+        fraction: seconds > 0 ? r(w.degradedSeconds / seconds, 3) : 0,
+        maxM: w.maxM,
+        maxLoadPct: r(w.maxLoadPct, 0),
+        maxLagMs: r(w.maxLagMs, 1),
+      },
+      caps: {
+        surgeTrackedMax: w.surgeTrackedMax,
+        surgeEvictedDelta: evictDelta,
+        surgeDroppedDelta: dropDelta,
+        tapeStrideMax: w.tapeStrideMax,
+      },
+    };
+  }
+
   function closeWindow(): void {
     if (cur === null) return;
     // 초 표본이 없는 창은 버린다 — 측정 종료가 창 경계에 걸리면 프레임 표본 1~2개만
@@ -238,31 +267,7 @@ export function createMeasurementRecorder(): MeasurementRecorder {
       cur = null;
       return;
     }
-    const evictDelta = Number.isNaN(cur.evictAtOpen) ? 0 : cur.evictLatest - cur.evictAtOpen;
-    const dropDelta = Number.isNaN(cur.dropAtOpen) ? 0 : cur.dropLatest - cur.dropAtOpen;
-    const seconds = cur.recv.length;
-    windows.push({
-      index: cur.index,
-      atSec: r((cur.startNow - startNow) / 1000, 0),
-      seconds,
-      recvPerSec: roundStat(stat5(cur.recv)),
-      procPerSec: roundStat(stat5(cur.proc)),
-      dropPerSec: roundStat(stat5(cur.drop)),
-      frameMs: roundFrame(frameStat(cur.frames)),
-      degraded: {
-        seconds: cur.degradedSeconds,
-        fraction: seconds > 0 ? r(cur.degradedSeconds / seconds, 3) : 0,
-        maxM: cur.maxM,
-        maxLoadPct: r(cur.maxLoadPct, 0),
-        maxLagMs: r(cur.maxLagMs, 1),
-      },
-      caps: {
-        surgeTrackedMax: cur.surgeTrackedMax,
-        surgeEvictedDelta: evictDelta,
-        surgeDroppedDelta: dropDelta,
-        tapeStrideMax: cur.tapeStrideMax,
-      },
-    });
+    windows.push(summarize(cur));
     cur = null;
   }
 
@@ -383,31 +388,7 @@ export function createMeasurementRecorder(): MeasurementRecorder {
       // 진행 중 창은 스냅샷 시점 그대로 임시로 닫아 결과에 포함(원본은 유지)
       const liveWindows = windows.slice();
       if (cur !== null && cur.recv.length > 0) {
-        const evictDelta = Number.isNaN(cur.evictAtOpen) ? 0 : cur.evictLatest - cur.evictAtOpen;
-        const dropDelta = Number.isNaN(cur.dropAtOpen) ? 0 : cur.dropLatest - cur.dropAtOpen;
-        const seconds = cur.recv.length;
-        liveWindows.push({
-          index: cur.index,
-          atSec: r((cur.startNow - startNow) / 1000, 0),
-          seconds,
-          recvPerSec: roundStat(stat5(cur.recv)),
-          procPerSec: roundStat(stat5(cur.proc)),
-          dropPerSec: roundStat(stat5(cur.drop)),
-          frameMs: roundFrame(frameStat(cur.frames)),
-          degraded: {
-            seconds: cur.degradedSeconds,
-            fraction: seconds > 0 ? r(cur.degradedSeconds / seconds, 3) : 0,
-            maxM: cur.maxM,
-            maxLoadPct: r(cur.maxLoadPct, 0),
-            maxLagMs: r(cur.maxLagMs, 1),
-          },
-          caps: {
-            surgeTrackedMax: cur.surgeTrackedMax,
-            surgeEvictedDelta: evictDelta,
-            surgeDroppedDelta: dropDelta,
-            tapeStrideMax: cur.tapeStrideMax,
-          },
-        });
+        liveWindows.push(summarize(cur));
       }
       const filter: MeasureExport["filter"] = filterMixed
         ? "mixed"

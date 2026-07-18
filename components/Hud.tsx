@@ -8,6 +8,7 @@ import {
   subscribeRenderPause,
 } from "@/lib/jetstream/renderGate";
 import { subscribeStream } from "@/lib/jetstream/useStreamWorker";
+import { isPlainHotkey, setText } from "@/lib/dom";
 import { createFrameTimeMeter } from "@/lib/perf/frameTime";
 import {
   isMeasuring,
@@ -46,10 +47,6 @@ const GAP_WINDOW = 10;
 
 /** 텍스트 갱신은 스냅샷과 같은 10Hz — 그보다 잦으면 읽을 수 없고 이득도 없다 */
 const TEXT_INTERVAL_MS = 100;
-
-function setText(el: HTMLElement, text: string): void {
-  if (el.textContent !== text) el.textContent = text;
-}
 
 /** 10,000 이상은 "12.3k"로 축약 — HUD 폭 안에 tracked/cap을 담기 위해 */
 function compact(n: number): string {
@@ -290,10 +287,7 @@ export default function Hud() {
   //   __jetstreamMeasureCtl.json()   → 60초 창 통계 JSON 문자열
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "m" || e.metaKey || e.ctrlKey || e.altKey) return;
-      const t = e.target as HTMLElement | null;
-      if (t !== null && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable))
-        return;
+      if (!isPlainHotkey(e, "m")) return;
       toggleMeasurement(`manual-${new Date().toISOString().slice(11, 19)}`);
     };
     window.addEventListener("keydown", onKey);

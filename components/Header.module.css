@@ -14,6 +14,7 @@
 }
 
 .mark {
+  margin: 0; /* h1 기본 마진 제거 — 표제 시맨틱만 취하고 배치는 그대로 */
   font-family: var(--font-mono), monospace;
   font-size: 15px;
   font-weight: 600;

@@ -9,6 +9,7 @@ import {
 } from "@/lib/jetstream/protocol";
 import { isRenderPaused } from "@/lib/jetstream/renderGate";
 import { subscribeStream } from "@/lib/jetstream/useStreamWorker";
+import { setAttr, setText } from "@/lib/dom";
 import styles from "./Mix.module.css";
 
 // Mix는 React를 고정 MIX_TOP_N+1개 막대 행의 마운트에만 쓴다. 이후 갱신은 rAF 루프가
@@ -31,14 +32,6 @@ interface RowEls {
 interface Slice {
   lang: string;
   count: number;
-}
-
-function setText(el: HTMLElement, text: string): void {
-  if (el.textContent !== text) el.textContent = text;
-}
-
-function setAttr(el: HTMLElement, name: string, value: string): void {
-  if (el.getAttribute(name) !== value) el.setAttribute(name, value);
 }
 
 function formatPct(count: number, total: number): string {

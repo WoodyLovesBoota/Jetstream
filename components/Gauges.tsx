@@ -4,6 +4,7 @@ import { useEffect, useRef, type CSSProperties } from "react";
 import type { GaugeKind, StreamSnapshot } from "@/lib/jetstream/protocol";
 import { isRenderPaused } from "@/lib/jetstream/renderGate";
 import { subscribeStream } from "@/lib/jetstream/useStreamWorker";
+import { setText } from "@/lib/dom";
 import { TYPE_COLORS } from "@/lib/palette";
 import styles from "./Gauges.module.css";
 
@@ -34,10 +35,6 @@ interface FillState {
   scale: number;
   flushFrom: number;
   flushAtMs: number;
-}
-
-function setText(el: HTMLElement, text: string): void {
-  if (el.textContent !== text) el.textContent = text;
 }
 
 /** EMA rate 표시 — 100 미만은 소수 1자리, 그 위는 정수(자리 요동 방지) */

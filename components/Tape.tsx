@@ -5,6 +5,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { TAPE_MAX_ROWS, type StreamSnapshot, type TapeRow } from "@/lib/jetstream/protocol";
 import { isRenderPaused } from "@/lib/jetstream/renderGate";
 import { subscribeStream } from "@/lib/jetstream/useStreamWorker";
+import { setText } from "@/lib/dom";
 import styles from "./Tape.module.css";
 
 // Tape는 워커가 이미 목표 append율(초당 15행)로 down-sample한 결과만 받는다.
@@ -58,7 +59,10 @@ export default function Tape() {
 
       const t = snapshot.tapeStats;
       if (statusRef.current) {
-        statusRef.current.textContent = `showing 1 in ${t.strideN} · sampled ${t.sampledPerSec}/s · skipped ${t.skippedPerSec}/s`;
+        setText(
+          statusRef.current,
+          `showing 1 in ${t.strideN} · sampled ${t.sampledPerSec}/s · skipped ${t.skippedPerSec}/s`,
+        );
       }
 
       if (snapshot.tapeRows.length === 0) return;

@@ -9,6 +9,7 @@ import {
 } from "@/lib/jetstream/protocol";
 import { isRenderPaused } from "@/lib/jetstream/renderGate";
 import { subscribeStream } from "@/lib/jetstream/useStreamWorker";
+import { setData, setText } from "@/lib/dom";
 import styles from "./Surge.module.css";
 
 // Surge — 트렌드 랭킹의 주인공 패널. React는 탭 버튼(저빈도 컨트롤)과 고정
@@ -57,14 +58,6 @@ interface Row {
   entryAtMs: number;
   /** data-instant(전환 억제)를 해제할 시각(ms) */
   instantUntilMs: number;
-}
-
-function setText(el: HTMLElement, text: string): void {
-  if (el.textContent !== text) el.textContent = text;
-}
-
-function setData(el: HTMLElement, key: string, value: string): void {
-  if (el.dataset[key] !== value) el.dataset[key] = value;
 }
 
 function deltaText(d: number | null): string {
