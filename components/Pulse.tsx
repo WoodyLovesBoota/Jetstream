@@ -34,10 +34,10 @@ const SERIES: SeriesDef[] = [
 ];
 
 // canvas는 CSS 커스텀 프로퍼티를 해석 못 한다 — app/globals.css 토큰값을 그대로 옮김
-const AXIS_STROKE = "#72869b"; // --muted
-const GRID_STROKE = "#1c2836"; // --line
-const GAP_STROKE = "#e5484d"; // --danger — 아직 비어 있는 단절 구간
-const REPLAY_STROKE = "#4ba3ff"; // --accent — 되감기가 메운 구간
+const AXIS_STROKE = "#8b98a6"; // --muted
+const GRID_STROKE = "#1c2632"; // --line
+const GAP_STROKE = "#f0546a"; // --danger — 아직 비어 있는 단절 구간
+const REPLAY_STROKE = "#4a9eff"; // --accent — 되감기가 메운 구간
 
 /** 우측 끝 현재값 라벨 사이에 확보하는 최소 세로 간격(px) */
 const EDGE_LABEL_GAP = 12;

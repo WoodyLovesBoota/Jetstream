@@ -120,7 +120,10 @@ export default function Gauges() {
           }
         }
 
-        // 채움은 매 프레임 — 플러시 애니메이션은 스냅샷 사이에서도 진행돼야 한다
+        // 채움은 매 프레임 — 플러시 애니메이션은 스냅샷 사이에서도 진행돼야 한다.
+        // 수면은 translateY로 끌어올린다: next=1이면 translateY(0%)로 가득, next=0이면
+        // translateY(100%)로 카드 아래로 밀려 비워진다. transform만 만지므로 리플로우가
+        // 없다(§1.3) — 물탱크 파도(자식 원)도 수면을 따라 함께 움직인다.
         for (let i = 0; i < KINDS.length; i++) {
           const f = fills[i];
           const stat = g.stats[KINDS[i]];
@@ -129,7 +132,7 @@ export default function Gauges() {
           const next = flushT < 1 ? f.flushFrom * (1 - flushT) : target;
           if (Math.abs(next - f.scale) > 0.001) {
             f.scale = next;
-            cells[i].fill.style.transform = `scaleY(${next.toFixed(4)})`;
+            cells[i].fill.style.transform = `translateY(${((1 - next) * 100).toFixed(2)}%)`;
           }
         }
       }
@@ -151,19 +154,28 @@ export default function Gauges() {
           data-type={k}
           style={{ "--type-color": TYPE_COLORS[k] } as CSSProperties}
         >
-          {/* 채움은 보조 채널 — 수치는 큰 숫자가 이미 전달한다 */}
-          <span className={styles.fill} data-cell="fill" aria-hidden="true" />
-          <div className={styles.head}>
-            <span className={styles.label}>{k}</span>
-            <span className={styles.delta} data-cell="delta" data-dir="flat">
-              —
-            </span>
+          {/* 물탱크 수면 — 보조 채널이다(수치는 큰 숫자가 이미 전달한다). rAF가
+              translateY로 수위를 끌어올리고, 안쪽 두 원이 회전해 파도를 만든다. */}
+          <div className={styles.water} data-cell="fill" aria-hidden="true">
+            <span className={styles.waveA} />
+            <span className={styles.waveB} />
           </div>
-          <div className={styles.num}>
-            <span className={styles.value} data-cell="value">
-              —
-            </span>
-            <span className={styles.unit}>/s</span>
+          <div className={styles.content}>
+            <div className={styles.head}>
+              <span className={styles.labelWrap}>
+                <span className={styles.swatch} />
+                <span className={styles.label}>{k}</span>
+              </span>
+              <span className={styles.delta} data-cell="delta" data-dir="flat">
+                —
+              </span>
+            </div>
+            <div className={styles.num}>
+              <span className={styles.value} data-cell="value">
+                —
+              </span>
+              <span className={styles.unit}>/s</span>
+            </div>
           </div>
         </div>
       ))}

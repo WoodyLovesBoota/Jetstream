@@ -1,3 +1,5 @@
+/* 시안 시그니처: 부드러운 12px 라운드 카드. 코너 틱 대신 라운드 + 얇은 라인으로
+   패널을 가른다. */
 .panel {
   position: relative;
   display: flex;
@@ -5,30 +7,7 @@
   min-height: 0;
   background: var(--surface);
   border: 1px solid var(--line);
-}
-
-/* 시그니처: 오실로스코프식 코너 틱 (좌상·우하) */
-.panel::before,
-.panel::after {
-  content: "";
-  position: absolute;
-  width: 12px;
-  height: 12px;
-  pointer-events: none;
-}
-
-.panel::before {
-  top: -1px;
-  left: -1px;
-  border-top: 1px solid var(--tick);
-  border-left: 1px solid var(--tick);
-}
-
-.panel::after {
-  bottom: -1px;
-  right: -1px;
-  border-bottom: 1px solid var(--tick);
-  border-right: 1px solid var(--tick);
+  border-radius: var(--radius);
 }
 
 .head {
@@ -36,24 +15,23 @@
   align-items: baseline;
   justify-content: space-between;
   gap: var(--gap);
-  padding: 10px var(--pad) 8px;
-  border-bottom: 1px solid var(--line);
+  padding: 16px var(--pad) 10px;
 }
 
 .name {
   margin: 0;
-  font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 11px;
+  font-family: var(--font-sans), var(--font-kr), sans-serif;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: var(--text);
+  color: #c9d4e0;
 }
 
 .note {
   font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 11px;
-  color: var(--muted);
+  font-size: 12px;
+  color: var(--faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -65,7 +43,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--pad);
+  padding: 0 var(--pad) var(--pad);
 }
 
 .empty {

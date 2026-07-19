@@ -14,9 +14,10 @@
   z-index: 4;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 1px 4px 2px;
-  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  gap: 16px;
+  padding: 2px 4px 4px;
+  border-radius: 0 0 0 var(--radius-sm);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
 }
 
 .legend {
@@ -32,17 +33,17 @@
 .legendItem {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
 }
 
 .swatch {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 3px;
   flex-shrink: 0;
-  border-radius: 1px;
+  border-radius: 2px;
 }
 
 /* 갭/리플레이 띠 범례 — 차트 위 띠와 같은 모양(반투명 채움 + 파선 테두리) */
@@ -54,31 +55,36 @@
   border-radius: 1px;
 }
 
+/* 세그먼트 토글 — 트랙 안에서 선택된 칸만 밝게 채워진다 */
 .windowToggle {
   display: flex;
   flex: none;
   gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #0a0f16;
 }
 
 .windowButton {
-  border: 1px solid var(--line);
+  border: none;
+  border-radius: 5px;
   background: transparent;
-  padding: 1px 7px;
+  padding: 4px 12px;
   font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.04em;
-  color: var(--muted);
+  color: var(--faint);
   cursor: pointer;
 }
 
 .windowButton:hover {
-  border-color: var(--tick);
   color: var(--text);
 }
 
 .windowButton[aria-pressed="true"] {
-  border-color: var(--accent);
-  color: var(--accent);
+  background: #1d2b3f;
+  color: #8fc0ff;
 }
 
 .chartWrap {
@@ -114,11 +120,12 @@
   left: 0;
   z-index: 3;
   min-width: 104px;
-  padding: 5px 8px 6px;
+  padding: 6px 9px 7px;
   background: color-mix(in srgb, var(--surface) 94%, transparent);
   border: 1px solid var(--line);
+  border-radius: 6px;
   font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 10px;
+  font-size: 11px;
   white-space: nowrap;
   pointer-events: none;
 }
@@ -161,5 +168,5 @@
 }
 
 .chartWrap :global(.u-select) {
-  background: rgba(215, 226, 238, 0.08);
+  background: rgba(230, 237, 243, 0.08);
 }

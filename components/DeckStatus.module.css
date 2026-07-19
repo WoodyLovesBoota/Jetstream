@@ -30,7 +30,7 @@
   }
 }
 
-/* 계기판 명판과 같은 시그니처 — 코너 틱(좌상·우하) */
+/* 상태 명판 — 패널과 같은 12px 라운드 카드 */
 .card {
   position: relative;
   min-width: min(340px, 82vw);
@@ -41,30 +41,8 @@
   gap: 6px;
   background: color-mix(in srgb, var(--surface) 82%, transparent);
   border: 1px solid var(--line);
+  border-radius: var(--radius);
   text-align: center;
-}
-
-.card::before,
-.card::after {
-  content: "";
-  position: absolute;
-  width: 14px;
-  height: 14px;
-  pointer-events: none;
-}
-
-.card::before {
-  top: -1px;
-  left: -1px;
-  border-top: 1px solid var(--tick);
-  border-left: 1px solid var(--tick);
-}
-
-.card::after {
-  bottom: -1px;
-  right: -1px;
-  border-bottom: 1px solid var(--tick);
-  border-right: 1px solid var(--tick);
 }
 
 .veil[data-mode="failed"] .card {
@@ -166,8 +144,8 @@
 /* ── 텍스트 ── */
 .label {
   margin: 0;
-  font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 15px;
+  font-family: var(--font-sans), var(--font-kr), sans-serif;
+  font-size: 16px;
   font-weight: 600;
   letter-spacing: 0.26em;
   text-transform: uppercase;

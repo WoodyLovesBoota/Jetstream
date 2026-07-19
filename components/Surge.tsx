@@ -33,8 +33,8 @@ const SPARK_H = 20;
 const HIGHLIGHT_MS = 30_000;
 
 // canvas는 CSS 변수를 못 읽는다 — globals.css 토큰값을 그대로 옮김
-const SPARK_ACCENT = "#4ba3ff"; // --accent, 급등 상태
-const SPARK_NEUTRAL = "#47586c"; // --faint, 그 외
+const SPARK_ACCENT = "#4a9eff"; // --accent, 급등 상태
+const SPARK_NEUTRAL = "#5c6b7a"; // --faint, 그 외
 
 const LIFE_LABEL: Record<SurgeLifecycle, string> = {
   new: "신규",
@@ -206,7 +206,7 @@ export default function Surge() {
         if (row.root.style.transform !== y) row.root.style.transform = y;
         if (isNewBinding && !instant && row.entryAtMs === now) {
           // 진입 하이라이트는 즉시 점등 — 감쇠는 매 프레임 decayHighlights가 맡는다
-          row.root.style.backgroundColor = "rgba(75, 163, 255, 0.16)";
+          row.root.style.backgroundColor = "rgba(74, 158, 255, 0.16)";
         }
       }
       if (shown.length > 0) firstFill[activeTab] = false;
@@ -235,7 +235,7 @@ export default function Surge() {
           row.root.style.backgroundColor = "";
         } else {
           const alpha = 0.16 * (1 - t / HIGHLIGHT_MS);
-          row.root.style.backgroundColor = `rgba(75, 163, 255, ${alpha.toFixed(3)})`;
+          row.root.style.backgroundColor = `rgba(74, 158, 255, ${alpha.toFixed(3)})`;
         }
       }
     }

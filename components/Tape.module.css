@@ -18,9 +18,9 @@
 
 .status {
   font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
-  color: var(--muted);
+  color: var(--faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -28,9 +28,10 @@
 
 .jumpBtn {
   flex: none;
-  border: 1px solid var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 6px;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
-  padding: 2px 9px;
+  padding: 3px 10px;
   font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 10px;
   letter-spacing: 0.06em;
@@ -69,16 +70,16 @@
   gap: 2px;
   width: 100%;
   height: 56px;
-  padding: 6px 2px 0;
-  border-bottom: 1px solid var(--line);
+  padding: 8px 2px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
   font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .meta {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 12px;
   white-space: nowrap;
   line-height: 1.2;
 }
@@ -86,7 +87,7 @@
 .time {
   flex: none;
   font-variant-numeric: tabular-nums;
-  color: var(--faint);
+  color: #6b7a89;
 }
 
 .did {
@@ -94,16 +95,18 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--accent);
+  color: #8fc0ff;
 }
 
 .langs {
   flex: none;
   margin-left: auto;
   max-width: 8ch;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--muted);
+  color: var(--faint);
 }
 
 .text {

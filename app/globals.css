@@ -1,21 +1,24 @@
 :root {
-  --bg: #070b11;
-  --surface: #0c141d;
-  --surface-2: #111b27;
-  --line: #1c2836;
-  --tick: #3d5573;
-  --text: #d7e2ee;
-  --muted: #72869b;
-  /* 가장 흐린 텍스트 톤(빈 상태·자리표시·소형 라벨). #47586c는 2.5:1로 WCAG
-     미달이었어서 3:1을 넘기되(surface 3.55 · bg 3.78 · surface-2 3.32) --muted(4.94)
-     보다는 확실히 어둡게 유지 — 계층은 그대로 두고 대비만 확보(P9 실측 조정) */
-  --faint: #5a6e88;
-  --accent: #4ba3ff;
-  --ok: #46d7a4;
-  --warn: #e8b04b;
-  --danger: #e5484d;
-  --gap: 10px;
-  --pad: 14px;
+  --bg: #070a0f;
+  --surface: #0f1621;
+  --surface-2: #0c121b;
+  --line: #1c2632;
+  --tick: #2b3c50;
+  --text: #e6edf3;
+  --muted: #8b98a6;
+  /* 가장 흐린 텍스트 톤(빈 상태·자리표시·소형 라벨). #0f1621 서피스 위에서 3:1을
+     넘기되(≈3.4:1) --muted(≈6.4:1)보다는 확실히 어둡게 유지 — 계층은 그대로 두고
+     대비만 확보한다. 시안이 쓰는 #4a5563(≈2.4:1)까지 내리지는 않는다. */
+  --faint: #5c6b7a;
+  --accent: #4a9eff;
+  --ok: #3fb950;
+  --warn: #e3a838;
+  --danger: #f0546a;
+  --repost: #f778ba;
+  --gap: 14px;
+  --pad: 20px;
+  --radius: 12px;
+  --radius-sm: 8px;
 }
 
 *,
@@ -37,10 +40,10 @@ body {
 
 body {
   background:
-    radial-gradient(90rem 40rem at 70% -20%, rgba(75, 163, 255, 0.06), transparent 60%),
+    radial-gradient(75rem 37rem at 20% -10%, #0d1420 0%, transparent 60%),
     var(--bg);
   color: var(--text);
-  font-family: var(--font-sans), var(--font-kr), system-ui, sans-serif;
+  font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;

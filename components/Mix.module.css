@@ -74,7 +74,8 @@
 .label {
   flex: none;
   width: 5ch;
-  color: var(--text);
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 /* other는 잔여 합산값이라 정체성 색을 새로 소비하지 않고 톤을 낮춘다 (Pulse와 같은 규칙) */
@@ -86,8 +87,10 @@
   position: relative;
   flex: 1;
   min-width: 0;
-  height: 8px;
-  background: rgba(57, 135, 229, 0.08);
+  height: 9px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: #0c131c;
 }
 
 .fill {
@@ -96,15 +99,14 @@
   bottom: 0;
   left: 0;
   min-width: 2px;
-  /* 데이터 끝만 둥글게, 기준선 쪽은 각지게 */
-  border-radius: 0 2px 2px 0;
-  background: #3987e5;
+  border-radius: 5px;
+  background: var(--accent);
   /* 스냅샷은 10Hz — 그 사이를 메워 계단이 아니라 흐름으로 읽히게 한다 */
   transition: width 110ms linear;
 }
 
 .row[data-lang="other"] .fill {
-  background: #47586c;
+  background: #6e7d8c;
 }
 
 .pct {

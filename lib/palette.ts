@@ -1,18 +1,18 @@
 // 이벤트 타입별 색상 팔레트 — 게이지 셀(Gauges)과 스루풋 차트(Pulse)가 공유한다.
 // 타입 ↔ 색 대응은 화면 어디서나 동일해야 하므로 여기 한 곳에만 둔다.
 //
-// post/like/repost/follow는 dataviz 카테고리컬 팔레트의 1-4번 슬롯(고정 순서).
-// "other"는 잔여 합산값이라 정체성 색을 소비하지 않고 --faint(회색)로 톤다운.
-// validate_palette.js로 이 앱의 실제 다크 표면(#0c141d) 대비 통과 확인함(P2).
+// post/like/repost/follow는 JetStream 시안의 정체성 4색(고정 순서). "other"는 잔여
+// 합산값이라 정체성 색을 소비하지 않고 회색(--faint 계열)으로 톤다운한다. 값은
+// app/globals.css의 --accent/--ok/--repost/--warn/--faint 토큰과 짝을 이룬다.
 
 export const TYPE_COLORS = {
-  post: "#3987e5",
-  like: "#008300",
-  repost: "#d55181",
-  follow: "#c98500",
-  // 잔여 합산값 — 정체성 색을 소비하지 않고 --faint(회색)로 톤다운. --faint와 같은
-  // 값으로 맞춰(P9) 우측 엣지 라벨 텍스트도 3:1 대비를 넘긴다.
-  other: "#5a6e88",
+  post: "#4a9eff",
+  like: "#3fb950",
+  repost: "#f778ba",
+  follow: "#e3a838",
+  // 잔여 합산값 — 정체성 색을 소비하지 않고 회색으로 톤다운. 시안의 중립 회색과
+  // 같은 값(#6e7d8c)이라 우측 엣지 라벨 텍스트도 다크 표면에서 3:1 대비를 넘긴다.
+  other: "#6e7d8c",
 } as const;
 
 export type TypeColorKey = keyof typeof TYPE_COLORS;

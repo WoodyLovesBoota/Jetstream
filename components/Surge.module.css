@@ -13,17 +13,18 @@
 .tabs {
   display: flex;
   flex: none;
-  gap: 2px;
+  gap: 8px;
 }
 
 .tab {
   border: 1px solid var(--line);
+  border-radius: 7px;
   background: transparent;
-  padding: 3px 12px;
+  padding: 8px 16px;
   font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--faint);
   cursor: pointer;
 }
 
@@ -33,9 +34,9 @@
 }
 
 .tab[aria-selected="true"] {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-color: #24354a;
+  color: #8fc0ff;
+  background: #15202e;
 }
 
 /* ── 리스트 ──────────────────────────────────────────────────────── */
@@ -56,11 +57,11 @@
   flex: none;
   align-items: baseline;
   gap: 10px;
-  padding: 4px 2px;
+  padding: 8px 2px;
   border-bottom: 1px solid var(--line);
   font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 10px;
-  letter-spacing: 0.08em;
+  font-size: 11px;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--faint);
 }
@@ -93,9 +94,9 @@
   width: 100%;
   height: 40px;
   padding: 0 2px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
   font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 12px;
+  font-size: 13px;
   white-space: nowrap;
   transition: transform 400ms ease;
   will-change: transform;
@@ -143,6 +144,7 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 15px;
   color: var(--text);
 }
 
@@ -165,29 +167,26 @@
   width: 6ch;
   text-align: right;
   font-variant-numeric: tabular-nums;
-  color: var(--text);
-}
-
-/* 급등 상태의 배수는 강조색 */
-.row[data-life="rising"] .mult {
-  color: var(--warn);
+  /* 버스트 배수는 시안대로 핑크로 통일 — 급등 여부는 옆의 상태 칩이 말한다 */
+  color: var(--repost);
 }
 
 /* ── 라이프사이클 칩 — 신규·급등만 유채색, 유지·하강은 저채도 ── */
 
 .chipCol {
   flex: none;
-  width: 40px;
+  width: 58px;
   display: flex;
   justify-content: flex-end;
 }
 
 .chip {
   display: inline-block;
-  padding: 1px 6px 2px;
+  padding: 4px 10px;
   border: 1px solid var(--line);
-  font-size: 10px;
-  line-height: 1.4;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.3;
   color: var(--faint);
 }
 
@@ -257,14 +256,15 @@
   flex: none;
   align-items: baseline;
   border-top: 1px solid var(--line);
-  padding-top: 5px;
+  padding-top: 12px;
+  margin-top: 4px;
 }
 
 .status {
   font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  color: var(--muted);
+  color: var(--faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

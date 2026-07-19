@@ -2,9 +2,10 @@
 .hud {
   flex: none;
   min-width: 0;
-  padding: 9px 12px 10px;
+  padding: 14px 18px 15px;
   background: var(--surface);
   border: 1px solid var(--line);
+  border-radius: var(--radius);
 }
 
 .head {
@@ -49,11 +50,11 @@
 
 .title {
   display: block;
-  font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 10px;
+  font-family: var(--font-sans), var(--font-kr), sans-serif;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.22em;
-  color: var(--faint);
+  color: #c9d4e0;
 }
 
 /* 배너는 둘 다 숨겨져 있는 것이 정상 상태라 평소에는 HUD 높이에 영향을 주지 않는다 */
@@ -66,8 +67,9 @@
 
 .notice {
   margin: 0;
-  padding: 4px 7px;
+  padding: 5px 9px;
   border-left: 2px solid currentColor;
+  border-radius: 0 6px 6px 0;
   background: color-mix(in srgb, currentColor 10%, transparent);
   font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 10px;

@@ -14,7 +14,7 @@
  */
 .pulse {
   flex: none;
-  height: clamp(150px, 16vh, 240px);
+  height: clamp(200px, 18vh, 260px);
 }
 
 /* 낮은 밴드에서는 패널 기본 패딩(14px)이 차트 높이를 다 잡아먹는다 — 몸통만 얇게.
@@ -23,13 +23,13 @@
   padding: 4px 10px 6px;
 }
 
-/* 메인 그리드 — Surge가 주인공(좌 62%), 우 38% 컬럼에 Tape·Mix·HUD */
+/* 메인 그리드 — Surge가 주인공(좌 1.35fr), 우 1fr 컬럼에 Tape·Mix·HUD (시안 비율) */
 .grid {
   flex: 1;
   min-height: 0;
   display: grid;
   gap: var(--gap);
-  grid-template-columns: minmax(0, 62fr) minmax(0, 38fr);
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
 }
 
 .surge {
@@ -54,10 +54,10 @@
   min-height: 220px;
 }
 
-/* 9행(상위 8 + other) × 행높이 + 크롬이 겹치지 않는 최소치 */
+/* 9행(상위 8 + other) × 행높이 + 크롬(라운드 헤더 포함)이 겹치지 않는 최소치 */
 .mix {
   flex: none;
-  height: 185px;
+  height: 210px;
 }
 
 @media (max-width: 1279.98px) {
