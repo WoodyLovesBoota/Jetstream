@@ -7,7 +7,7 @@
   border: 1px solid var(--line);
 }
 
-/* 시그니처: 오실로스코프식 코너 틱 (좌상·우하) */
+/* Signature: oscilloscope-style corner ticks (top-left · bottom-right) */
 .panel::before,
 .panel::after {
   content: "";

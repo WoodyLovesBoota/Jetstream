@@ -70,7 +70,7 @@
   outline: none;
 }
 
-/* 워커가 실제 적용 중인 값 — 입력과 어긋나면(클램프) 여기서 드러난다 */
+/* The values the worker is actually applying — if they diverge from the input (clamping), it shows up here */
 .applied {
   margin: 8px 0 0;
   padding-top: 6px;

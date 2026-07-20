@@ -2,6 +2,6 @@ ignoredBuiltDependencies:
   - sharp
   - unrs-resolver
 
-# next가 끌고 오는 postcss < 8.5.10의 moderate 취약점(GHSA-qx2v-qp2m-jg93) 패치 강제
+# Force a patch for the moderate vulnerability in postcss < 8.5.10 (GHSA-qx2v-qp2m-jg93) pulled in by next
 overrides:
   postcss: ^8.5.10

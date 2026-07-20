@@ -1,7 +1,8 @@
-// WebSocket 수명 관리 — 개설, 지수 백오프 재연결, 인스턴스 페일오버, 커서 재개,
-// 단절 구간(갭) 기록. 집계는 전혀 모른다. 워커는 받은 프레임을 집계에 반영한 뒤
-// noteEvent()로 그 이벤트의 time_us만 되돌려 주고, 이 모듈은 그 값 하나로
-// 재개 커서·리플레이 판정·갭 종료를 전부 끌어낸다.
+// WebSocket lifetime management — opening, exponential-backoff reconnection, instance
+// failover, cursor resume, and recording disconnect stretches (gaps). It knows nothing
+// about aggregation. The worker aggregates each frame it receives and then hands back only
+// that event's time_us via noteEvent(), and this module derives the resume cursor, the
+// replay decision, and gap closure entirely from that one value.
 
 import {
   CURSOR_REWIND_US,
@@ -18,26 +19,27 @@ import {
   type WsState,
 } from "./protocol";
 
-// 소켓 URL은 `wantedCollections`가 하나도 없으면 파라미터 자체를 붙이지 않는다 —
-// 그게 Jetstream에서 "모든 컬렉션"을 뜻한다(풀 스트림).
+// If there is not a single `wantedCollections` entry, the socket URL omits the parameter
+// altogether — that is what "all collections" means to Jetstream (the full stream).
 
 export interface Connection {
-  /** 소켓을 열고(이미 열려 있으면 무시) 자동 복구를 켠다 */
+  /** Opens the socket (ignored if already open) and turns on automatic recovery */
   start(endpoints: string[], wantedCollections: string[]): void;
-  /** 명령에 의한 종료 — 재연결하지 않는다 */
+  /** Shutdown by command — does not reconnect */
   stop(): void;
   /**
-   * 컬렉션 필터만 갈아끼운다. 필터는 소켓 URL의 쿼리라 다시 여는 수밖에 없지만,
-   * 재개 커서를 그대로 재사용하므로 전환 구간이 비지 않는다. 의도된 재연결이라
-   * 갭 마커도 남기지 않고 백오프도 타지 않는다 — 즉시 다시 연다.
+   * Swaps out only the collection filter. The filter lives in the socket URL's query
+   * string, so there is no way around reopening, but the resume cursor is reused as-is so
+   * the switch leaves no hole. Being an intentional reconnect, it leaves no gap marker and
+   * takes no backoff either — it reopens immediately.
    */
   setFilter(collections: string[]): void;
-  /** 워커가 이벤트 하나를 집계에 반영한 직후 호출한다 */
+  /** Called by the worker immediately after it aggregates a single event */
   noteEvent(timeUs: number): void;
   status(): ConnStatus;
-  /** 링 보관 구간과 겹치는 갭만 (오래된 것 → 최신 순) */
+  /** Only gaps overlapping the ring's retention window (oldest → newest) */
   gaps(nowSec: number): GapMarker[];
-  /** 개발용 강제 단절 — blockMs 동안은 재연결 시도도 실패시킨다 */
+  /** Dev-only forced disconnect — reconnect attempts are made to fail for blockMs as well */
   debugDrop(blockMs: number): void;
 }
 
@@ -50,16 +52,16 @@ export function createConnection(onFrame: (data: unknown) => void): Connection {
   let state: WsState = "closed";
   let stopped = true;
 
-  let attempt = 0; // 연속 실패 횟수 — 연결 성공 시 0
+  let attempt = 0; // consecutive failures — 0 on a successful connection
   let reconnects = 0;
   let failovers = 0;
 
   let timer: ReturnType<typeof setTimeout> | null = null;
   let retryAtMs = 0;
 
-  /** 마지막으로 집계에 반영한 이벤트의 time_us — 재개 커서의 유일한 근거 */
+  /** time_us of the last event aggregated — the sole basis of the resume cursor */
   let lastEventTimeUs = 0;
-  /** 개발용 단절 흉내가 끝나는 시각(ms). 그 전까지는 소켓을 열지 않는다 */
+  /** The time (ms) at which the dev-only simulated disconnect ends. Until then no socket is opened */
   let blockUntilMs = 0;
 
   const gapList: GapMarker[] = [];
@@ -68,10 +70,11 @@ export function createConnection(onFrame: (data: unknown) => void): Connection {
     return Math.floor(Date.now() / 1000);
   }
 
-  // ── 갭 기록 ────────────────────────────────────────────────────
+  // ── Gap recording ──────────────────────────────────────────────
   //
-  // 갭은 "끊긴 순간부터 다시 이어질 때까지"의 한 덩어리다. 백오프 재시도가 여러 번
-  // 실패해도 갭은 하나 — 이미 열린 갭이 있으면 새로 만들지 않는다.
+  // A gap is one contiguous stretch, "from the moment it was cut until it resumes". Even
+  // if several backoff retries fail, there is only one gap — if a gap is already open, no
+  // new one is created.
 
   function openGap(): void {
     if (gapList.length > 0 && gapList[gapList.length - 1].toSec === -1) return;
@@ -88,25 +91,26 @@ export function createConnection(onFrame: (data: unknown) => void): Connection {
 
     const open = gapList.length > 0 ? gapList[gapList.length - 1] : null;
     if (open !== null) {
-      // 복구 후 첫 이벤트가 갭의 끝을 확정한다
+      // The first event after recovery fixes the end of the gap
       if (open.toSec === -1) open.toSec = nowSec();
-      // 그 뒤로 갭 구간 안쪽 시각의 이벤트가 들어오면 되감기가 실제로 메운 것
+      // If events timestamped inside the gap stretch arrive after that, the rewind actually filled it
       const sec = Math.floor(timeUs / 1_000_000);
       if (!open.replayed && sec >= open.fromSec && sec < open.toSec) open.replayed = true;
     }
 
     if (state !== "connecting" && state !== "live" && state !== "replaying") return;
-    // 벽시계보다 유의미하게 과거면 아직 되감기 재생 중이다
+    // Meaningfully behind the wall clock means rewind playback is still in progress
     state = Date.now() * 1000 - timeUs > REPLAY_LAG_US ? "replaying" : "live";
   }
 
-  // ── 소켓 개설 ──────────────────────────────────────────────────
+  // ── Opening the socket ─────────────────────────────────────────
 
   /**
-   * 재개 커서 = 마지막 처리 이벤트 − 5초. 단, 링이 보관하는 300초보다 더 되감지
-   * 않는다 — 그보다 오래된 이벤트는 도착해도 넣을 버킷이 없고, 긴 단절 뒤에
-   * 표시하지도 못할 분량을 10배속으로 재생하며 CPU만 태우게 된다.
-   * 최초 연결(커서 없음)은 라이브 테일이다.
+   * Resume cursor = last processed event − 5 seconds. It never rewinds further than the
+   * 300 seconds the ring retains — events older than that have no bucket to go into even
+   * if they arrive, and after a long disconnect we would only burn CPU replaying at 10×
+   * speed a volume we can't even display.
+   * The initial connection (no cursor) is a live tail.
    */
   function resumeCursorUs(): number | null {
     if (lastEventTimeUs === 0) return null;
@@ -118,8 +122,9 @@ export function createConnection(onFrame: (data: unknown) => void): Connection {
     retryAtMs = 0;
 
     if (Date.now() < blockUntilMs) {
-      // 개발용 단절 흉내 — 소켓을 열지 않고 실패로 처리해 백오프·페일오버·HUD 표시를
-      // 실제 단절과 똑같은 경로로 태운다.
+      // Dev-only simulated disconnect — no socket is opened and it is treated as a failure,
+      // so backoff, failover, and the HUD display all take exactly the same path as a real
+      // disconnect.
       state = "connecting";
       timer = setTimeout(() => {
         timer = null;
@@ -143,8 +148,9 @@ export function createConnection(onFrame: (data: unknown) => void): Connection {
       if (ws !== socket) return;
       if (attempt > 0) reconnects++;
       attempt = 0;
-      // 커서를 실어 보냈으면 서버는 과거부터 재생한다. 실제로 따라잡혔는지는
-      // 첫 이벤트의 time_us가 말해주므로, 판정은 noteEvent에 맡긴다.
+      // If we sent a cursor the server replays from the past. Whether we have actually
+      // caught up is what the first event's time_us tells us, so the decision is left to
+      // noteEvent.
       state = cursorUs === null ? "live" : "replaying";
     };
     socket.onmessage = (e) => {
@@ -157,13 +163,13 @@ export function createConnection(onFrame: (data: unknown) => void): Connection {
       handleDrop();
     };
     socket.onerror = () => {
-      // onerror 뒤에는 항상 onclose가 따라오므로 여기서는 아무것도 하지 않는다
+      // onclose always follows onerror, so there is nothing to do here
     };
   }
 
-  // ── 단절 처리: 백오프 + 페일오버 ────────────────────────────────
+  // ── Handling a disconnect: backoff + failover ───────────────────
 
-  /** 시도 n의 대기 = min(1s·2^(n−1), 30s)에 ±20% 지터 */
+  /** Wait for attempt n = min(1s·2^(n−1), 30s) with ±20% jitter */
   function backoffMs(): number {
     const base = Math.min(RECONNECT_BASE_MS * 2 ** (attempt - 1), RECONNECT_MAX_MS);
     return Math.round(base * (1 - RECONNECT_JITTER + Math.random() * RECONNECT_JITTER * 2));
@@ -179,15 +185,16 @@ export function createConnection(onFrame: (data: unknown) => void): Connection {
     openGap();
     attempt++;
 
-    // 같은 인스턴스에서 두 번 연속 실패하면 다음 인스턴스로. 커서가 시간 기반이라
-    // 옮겨가도 재개 지점은 그대로 통한다.
+    // Two consecutive failures on the same instance move us to the next one. The cursor is
+    // time-based, so the resume point still holds after the move.
     if (attempt % FAILOVER_AFTER_ATTEMPTS === 0) {
       instanceIdx = (instanceIdx + 1) % endpoints.length;
       failovers++;
     }
 
-    // 인스턴스를 한 바퀴 다 돌고도 못 붙었으면 failed로 표시한다. 그래도 재시도는
-    // 상한 간격으로 계속한다 — "포기"가 아니라 "복구 못 하고 있다"는 정직한 표시.
+    // If we cycled through every instance and still couldn't attach, mark it failed. Even
+    // then retries continue at the ceiling interval — an honest display of "not recovering",
+    // not "giving up".
     const failedAfter = endpoints.length * FAILOVER_AFTER_ATTEMPTS;
     state = attempt >= failedAfter ? "failed" : "reconnecting";
 
@@ -207,7 +214,7 @@ export function createConnection(onFrame: (data: unknown) => void): Connection {
     retryAtMs = 0;
   }
 
-  // ── 외부 인터페이스 ────────────────────────────────────────────
+  // ── External interface ─────────────────────────────────────────
 
   return {
     start(nextEndpoints, collections) {
@@ -233,9 +240,10 @@ export function createConnection(onFrame: (data: unknown) => void): Connection {
 
       clearTimer();
       const socket = ws;
-      ws = null; // onclose 가드가 걸려 handleDrop이 돌지 않는다 — 갭도 백오프도 없다
+      ws = null; // the onclose guard trips so handleDrop never runs — no gap, no backoff
       socket?.close();
-      // 시도 횟수는 리셋한다. 직전 실패 이력은 새 필터의 연결 건전성과 무관하다.
+      // Reset the attempt count. The preceding failure history says nothing about the
+      // connection health of the new filter.
       attempt = 0;
       openSocket();
     },
@@ -257,7 +265,7 @@ export function createConnection(onFrame: (data: unknown) => void): Connection {
     },
 
     gaps(now) {
-      // 링에서 이미 밀려난 갭은 그릴 자리가 없다 — 잘라내고 보낸다
+      // Gaps already pushed out of the ring have nowhere to be drawn — trim them before sending
       const oldest = now - RING_SECONDS;
       while (gapList.length > 0 && gapList[0].toSec !== -1 && gapList[0].toSec < oldest) {
         gapList.shift();
@@ -269,7 +277,7 @@ export function createConnection(onFrame: (data: unknown) => void): Connection {
       blockUntilMs = Date.now() + blockMs;
       clearTimer();
       const socket = ws;
-      ws = null; // onclose 가드가 걸리므로 단절 처리는 직접 호출한다
+      ws = null; // the onclose guard trips, so the disconnect handling is invoked directly
       socket?.close();
       handleDrop();
     },

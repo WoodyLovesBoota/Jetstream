@@ -8,16 +8,19 @@ import { subscribeStream } from "@/lib/jetstream/useStreamWorker";
 import { setText } from "@/lib/dom";
 import styles from "./Tape.module.css";
 
-// Tape는 워커가 이미 목표 append율(초당 15행)로 down-sample한 결과만 받는다.
-// TanStack Virtual이 리스트 상태 갱신마다 리렌더를 요구하므로(그 자체가 실제
-// DOM 노드 수를 뷰포트+overscan 크기로 고정하는 장치), 다른 패널과 달리 이
-// 컴포넌트만 rows를 React state로 들고 있다 — append 빈도가 낮아(≤10Hz 스냅샷
-// 배치) 설계 §1.3의 "데이터 경로 리렌더 금지"가 노리는 초당 수천 건 리렌더와는
-// 무관하다. 상태줄(showing/sampled/skipped)은 그 원칙대로 ref+textContent로 갱신.
+// Tape only ever receives what the worker already down-sampled to the target
+// append rate (15 rows per second). Because TanStack Virtual requires a
+// rerender on every list state update (that being the very mechanism that pins
+// the real DOM node count to viewport + overscan), this component alone — unlike
+// the other panels — keeps rows in React state. The append frequency is low
+// (batched into ≤10Hz snapshots), so it has nothing to do with the thousands of
+// rerenders per second that design §1.3's "no rerenders on the data path" is
+// aimed at. The status line (showing/sampled/skipped) follows that principle and
+// is updated via ref + textContent.
 
-/** 세로 테이프 행: 메타 한 줄 + 본문 2줄 말줄임 — Tape.module.css의 .row와 맞물린 값 */
+/** Vertical tape row: one meta line + body clamped to 2 lines — matches .row in Tape.module.css */
 const ROW_HEIGHT = 56;
-/** 이 거리(px) 안이면 "꼭대기"로 간주 — 프로그램적 스크롤도 여기 걸려야 자동스크롤이 안 끊긴다 */
+/** Within this distance (px) counts as "at the top" — programmatic scrolls must land inside it too, or autoscroll breaks */
 const TOP_THRESHOLD_PX = 48;
 
 interface Row extends TapeRow {
@@ -40,7 +43,7 @@ export default function Tape() {
   const nextId = useRef(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const statusRef = useRef<HTMLSpanElement | null>(null);
-  /** 직전 렌더 이후 위쪽에 끼워 넣은 행 수 — 수동 스크롤 중 읽던 위치를 붙잡아 두는 데 쓴다 */
+  /** Rows prepended since the last render — used to hold the reading position during a manual scroll */
   const prependedRef = useRef(0);
 
   const rowVirtualizer = useVirtualizer({
@@ -52,9 +55,11 @@ export default function Tape() {
 
   useEffect(() => {
     return subscribeStream((snapshot: StreamSnapshot) => {
-      // Pause 중에는 이 배치를 통째로 버린다. 쌓아뒀다 재개 시 쏟아내면 그게 바로
-      // "밀린 프레임 따라 그리기"라, 정지가 길수록 재개가 무거워진다 — 여기서 버려야
-      // 재개 비용이 정지 길이와 무관해진다. 버린 규모는 HUD의 buffering 카운터가 센다.
+      // While paused, drop this batch entirely. Stockpiling it and dumping it on
+      // resume is exactly "painting the backlog of frames", which makes resuming
+      // heavier the longer the pause ran — dropping it here is what makes the
+      // resume cost independent of the pause length. The HUD's buffering counter
+      // counts how much was dropped.
       if (isRenderPaused()) return;
 
       const t = snapshot.tapeStats;
@@ -66,14 +71,16 @@ export default function Tape() {
       }
 
       if (snapshot.tapeRows.length === 0) return;
-      // 최신이 위 — 배치 안에서도 시간 역순이 되도록 뒤집어서 앞에 붙인다.
-      // id 발급과 카운트는 updater 밖에서 한다: StrictMode가 updater를 두 번 호출하므로
-      // 그 안에서 ref를 건드리면 보정량이 두 배로 부풀어 스크롤이 미끄러진다.
+      // Newest on top — reverse before prepending so the order is newest-first
+      // within the batch too.
+      // Issuing ids and counting happen outside the updater: StrictMode calls
+      // the updater twice, so touching the ref inside it doubles the correction
+      // and the scroll slips.
       const incoming = snapshot.tapeRows.map((r) => ({ ...r, id: nextId.current++ })).reverse();
       prependedRef.current += incoming.length;
       setRows((prev) => {
         const merged = incoming.concat(prev);
-        // 링버퍼: 상한을 넘으면 오래된 행(=아래쪽)부터 폐기 — 이미 화면에 보여준 행이라 조용한 손실이 아니다
+        // Ring buffer: past the cap, discard the oldest rows (= the bottom) — they were already shown on screen, so this is not a silent loss
         if (merged.length > TAPE_MAX_ROWS) merged.length = TAPE_MAX_ROWS;
         return merged;
       });
@@ -87,7 +94,7 @@ export default function Tape() {
     if (autoScrollRef.current) {
       rowVirtualizer.scrollToIndex(0, { align: "start" });
     } else if (prepended > 0 && scrollRef.current !== null) {
-      // 위쪽에 행이 끼어들면 보고 있던 행이 그만큼 아래로 밀린다 — 스크롤로 상쇄해 제자리에 붙잡는다
+      // Rows inserted above push the row being read down by that much — offset it with a scroll to hold it in place
       scrollRef.current.scrollTop += prepended * ROW_HEIGHT;
     }
   }, [rows, rowVirtualizer]);
@@ -122,8 +129,9 @@ export default function Tape() {
           </button>
         )}
       </div>
-      {/* data-rows: 메인 스레드 테이프 링의 현재 행 수 — TAPE_MAX_ROWS(2000) 상한이
-          실제로 멈추는지 검증하는 관측점. 렌더 시점에 이미 있는 값이라 비용 없음. */}
+      {/* data-rows: the current row count of the main-thread tape ring — the
+          observation point for verifying the TAPE_MAX_ROWS(2000) cap actually
+          holds. The value already exists at render time, so it costs nothing. */}
       <div
         className={styles.scrollArea}
         ref={scrollRef}

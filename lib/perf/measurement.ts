@@ -1,20 +1,21 @@
-// 측정 모드(P9) — 성능 검증을 자동화하는 계측 계층.
+// Measurement mode (P9) — the instrumentation layer that automates performance verification.
 //
-// HUD가 rAF 틱마다 프레임 간격을, 벽시계 초가 바뀔 때마다 스냅샷 실측 카운터를
-// 먹여준다. 활성일 때만 60초 창으로 묶어 통계(min·p50·avg·p95·max)를 산출하고,
-// export()가 그 창들을 JSON으로 되돌린다 — 저사양 시나리오를 사람이 눈으로 받아
-// 적을 필요 없이 그대로 뽑을 수 있게.
+// The HUD feeds in the frame interval on every rAF tick, and the measured counters from the
+// snapshot whenever the wall-clock second changes. Only while active does it group those into
+// 60-second windows and derive statistics (min/p50/avg/p95/max); export() turns those windows
+// back into JSON — so low-end scenarios can be pulled straight out instead of being read off
+// the screen and copied down by hand.
 //
-// 설계 §1과 같은 원칙: 여기서 만드는 숫자는 전부 워커가 실측해 스냅샷에 실은 값
-// (recv/s·drop/s·M·load%·lag)과 메인 스레드가 실측한 프레임 간격뿐이다. 추정·보정
-// 없이 관측한 값만 담는다.
+// Same principle as design §1: every number produced here is either a value the worker measured
+// and put on the snapshot (recv/s, drop/s, M, load%, lag) or a frame interval measured by the
+// main thread. Only observed values, no estimates or corrections.
 
 import { RING_SECONDS, type FilterMode, type SurgeTuning } from "@/lib/jetstream/protocol";
 
-/** 60초 고정 창 — 브리프의 "60초 구간 통계" */
+/** Fixed 60-second window — the brief's "60-second interval statistics" */
 export const MEASURE_WINDOW_MS = 60_000;
 
-/** 초 단위 표본 하나(min·p50·avg·p95·max) */
+/** A single per-second sample (min/p50/avg/p95/max) */
 export interface Stat5 {
   min: number;
   p50: number;
@@ -23,54 +24,54 @@ export interface Stat5 {
   max: number;
 }
 
-/** 프레임 간격 표본 요약 — rAF 페인트가 60Hz면 창당 수천 개 */
+/** Frame interval sample summary — at 60Hz rAF paints, thousands per window */
 export interface FrameStat {
   p50: number;
   p95: number;
   p99: number;
   max: number;
-  /** 표본 수 */
+  /** Sample count */
   n: number;
 }
 
-/** HUD가 벽시계 초마다 넘기는 한 초의 실측치 — 전부 스냅샷에서 온 값 */
+/** One second of measured values handed over by the HUD each wall-clock second — all from the snapshot */
 export interface MeasureSecond {
   recvPerSec: number;
   procPerSec: number;
   dropPerSec: number;
-  /** degraded 샘플링 분모(정상 1) */
+  /** degraded sampling denominator (1 when normal) */
   m: number;
-  /** 예산 대비 부하 %(100이 진입선) */
+  /** Load as % of budget (100 is the entry threshold) */
   loadPct: number;
-  /** 스냅샷 틱 실측 지연 EMA(ms) */
+  /** Measured snapshot tick delay EMA (ms) */
   lagMs: number;
   degraded: boolean;
   filter: FilterMode;
-  /** Surge 추적 토큰 수 / 상한 / 누적 퇴출 / 누적 드롭 */
+  /** Surge tracked token count / cap / cumulative evictions / cumulative drops */
   surgeTracked: number;
   surgeCap: number;
   surgeEvicted: number;
   surgeDropped: number;
   /** Tape stride N */
   tapeStrideN: number;
-  /** 워커가 실제 적용 중인 튜닝값 */
+  /** The tuning values the worker is actually applying */
   tuning: SurgeTuning;
 }
 
 export interface MeasureWindow {
   index: number;
-  /** 측정 시작 대비 창 시작 오프셋(초) */
+  /** Window start offset relative to measurement start (seconds) */
   atSec: number;
-  /** 창에 담긴 초 표본 수(정상이면 60 부근) */
+  /** Number of per-second samples in the window (around 60 when normal) */
   seconds: number;
   recvPerSec: Stat5;
   procPerSec: Stat5;
   dropPerSec: Stat5;
   frameMs: FrameStat;
   degraded: {
-    /** degraded로 관측된 초 수 */
+    /** Number of seconds observed as degraded */
     seconds: number;
-    /** 창 안에서 degraded였던 비율(0..1) */
+    /** Fraction of the window spent degraded (0..1) */
     fraction: number;
     maxM: number;
     maxLoadPct: number;
@@ -78,9 +79,9 @@ export interface MeasureWindow {
   };
   caps: {
     surgeTrackedMax: number;
-    /** 이 창 동안 늘어난 퇴출 수 */
+    /** Evictions added during this window */
     surgeEvictedDelta: number;
-    /** 이 창 동안 늘어난 드롭 수(만석) */
+    /** Drops added during this window (at capacity) */
     surgeDroppedDelta: number;
     tapeStrideMax: number;
   };
@@ -89,16 +90,16 @@ export interface MeasureWindow {
 export interface MeasureExport {
   scenario: string;
   meta: Record<string, unknown>;
-  /** 측정 시작 시각(Date.now, 브라우저) */
+  /** Measurement start time (Date.now, browser) */
   startedAt: number;
   durationSec: number;
-  /** 관측된 필터 — 창 사이에 바뀌면 "mixed" */
+  /** Observed filter — "mixed" if it changed between windows */
   filter: FilterMode | "mixed" | "unknown";
-  /** 마지막으로 관측한 튜닝값(= 확정값). 세션 중 바뀌면 tuningChanged가 true */
+  /** Last observed tuning values (= the final ones). tuningChanged is true if they changed mid-session */
   tuning: SurgeTuning | null;
   tuningChanged: boolean;
   windows: MeasureWindow[];
-  /** 세션 전체 상한 관측 — 장시간 소크의 근거 */
+  /** Session-wide ceiling observations — the evidence for long soaks */
   caps: {
     surgeTrackedMax: number;
     surgeCap: number;
@@ -141,7 +142,7 @@ function frameStat(values: number[]): FrameStat {
   };
 }
 
-/** round to `d` decimals — JSON을 사람이 읽을 만하게 */
+/** round to `d` decimals — to keep the JSON human-readable */
 function r(n: number, d = 1): number {
   const f = 10 ** d;
   return Math.round(n * f) / f;
@@ -167,20 +168,20 @@ interface OpenWindow {
 }
 
 /**
- * 측정 레코더 — 순수 집계기. DOM/React 없음, 스스로 rAF도 돌리지 않는다.
- * HUD가 이미 도는 rAF 루프에서 noteFrame/noteSecond를 먹여준다.
+ * Measurement recorder — a pure aggregator. No DOM/React, and it does not run an rAF loop
+ * of its own. The HUD feeds noteFrame/noteSecond from the rAF loop it already runs.
  */
 export interface MeasurementRecorder {
   active(): boolean;
   windowCount(): number;
-  /** 측정 시작 — 시나리오 라벨과 임의 메타(스로틀 배율 등)를 함께 기록 */
+  /** Start measuring — records the scenario label along with arbitrary meta (throttle multiplier, etc.) */
   start(scenario: string, meta?: Record<string, unknown>, nowMs?: number): void;
-  /** 진행 중 창을 닫고 중지 */
+  /** Close the in-progress window and stop */
   stop(nowMs?: number): void;
   reset(): void;
-  /** rAF 틱마다 프레임 간격(ms)을 넘긴다 — 비활성이면 무시 */
+  /** Hand over the frame interval (ms) on every rAF tick — ignored when inactive */
   noteFrame(nowMs: number, intervalMs: number): void;
-  /** 벽시계 초마다 그 초의 실측치를 넘긴다 — 비활성이면 무시 */
+  /** Hand over that second's measured values each wall-clock second — ignored when inactive */
   noteSecond(nowMs: number, s: MeasureSecond): void;
   export(): MeasureExport;
 }
@@ -230,7 +231,7 @@ export function createMeasurementRecorder(): MeasurementRecorder {
     };
   }
 
-  /** 열린 창 하나를 MeasureWindow 요약으로 — closeWindow와 export가 공유한다 */
+  /** Turn one open window into a MeasureWindow summary — shared by closeWindow and export */
   function summarize(w: OpenWindow): MeasureWindow {
     const evictDelta = Number.isNaN(w.evictAtOpen) ? 0 : w.evictLatest - w.evictAtOpen;
     const dropDelta = Number.isNaN(w.dropAtOpen) ? 0 : w.dropLatest - w.dropAtOpen;
@@ -261,8 +262,9 @@ export function createMeasurementRecorder(): MeasurementRecorder {
 
   function closeWindow(): void {
     if (cur === null) return;
-    // 초 표본이 없는 창은 버린다 — 측정 종료가 창 경계에 걸리면 프레임 표본 1~2개만
-    // 든 껍데기 창이 남고, recv/drop이 전부 0으로 잡혀 통계를 오염시킨다(실측으로 확인).
+    // Discard windows with no per-second samples — if measurement ends on a window boundary,
+    // an empty shell window holding only 1-2 frame samples is left behind, with recv/drop all
+    // read as 0, polluting the statistics (confirmed by measurement).
     if (cur.recv.length === 0) {
       cur = null;
       return;
@@ -278,7 +280,7 @@ export function createMeasurementRecorder(): MeasurementRecorder {
     return { p50: r(f.p50), p95: r(f.p95), p99: r(f.p99), max: r(f.max), n: f.n };
   }
 
-  /** 필요한 만큼 창을 굴린다 — 표본 사이에 60초 넘는 공백이 있어도 안전 */
+  /** Roll windows as many times as needed — safe even with gaps longer than 60s between samples */
   function roll(nowMs: number): void {
     if (cur === null) {
       openWindow(0, startNow);
@@ -341,10 +343,11 @@ export function createMeasurementRecorder(): MeasurementRecorder {
       if (!isActive) return;
       roll(nowMs);
       lastNow = nowMs;
-      // 탭 백그라운딩은 HUD가 visibilitychange에서 prevFrame을 리셋해 이미 걸러낸다.
-      // 여기 남는 2s↑ 간격은 rAF 루프가 통째로 디스케줄된 스케줄러 공백뿐이라 그것만
-      // 제외한다 — 저사양에서 실제로 늘어진 렌더 프레임(수십~수백 ms)은 그대로 담아야
-      // p95가 정직하다.
+      // Tab backgrounding is already filtered out by the HUD, which resets prevFrame on
+      // visibilitychange. The 2s+ intervals left here are only scheduler gaps where the rAF loop
+      // was descheduled wholesale, so those are the only ones excluded — render frames that
+      // genuinely stretched out on low-end hardware (tens to hundreds of ms) must be kept for
+      // p95 to stay honest.
       if (cur !== null && intervalMs > 0 && intervalMs < 2_000) cur.frames.push(intervalMs);
     },
 
@@ -368,7 +371,7 @@ export function createMeasurementRecorder(): MeasurementRecorder {
       if (Number.isNaN(cur.dropAtOpen)) cur.dropAtOpen = s.surgeDropped;
       cur.dropLatest = s.surgeDropped;
 
-      // 세션 전체 상한/필터/튜닝 추적
+      // Track session-wide ceilings / filter / tuning
       if (filterSeen === null) filterSeen = s.filter;
       else if (filterSeen !== s.filter) filterMixed = true;
       const tuneKey = JSON.stringify(s.tuning);
@@ -385,7 +388,8 @@ export function createMeasurementRecorder(): MeasurementRecorder {
     },
 
     export() {
-      // 진행 중 창은 스냅샷 시점 그대로 임시로 닫아 결과에 포함(원본은 유지)
+      // Temporarily close the in-progress window as of the snapshot instant so it is included
+      // in the result (the original is left intact)
       const liveWindows = windows.slice();
       if (cur !== null && cur.recv.length > 0) {
         liveWindows.push(summarize(cur));
@@ -415,9 +419,9 @@ export function createMeasurementRecorder(): MeasurementRecorder {
   };
 }
 
-// ── 모듈 싱글턴 + 컨트롤 ────────────────────────────────────────────
-// HUD가 하나의 레코더를 마운트 내내 먹여준다. 시작/중지/내보내기는 개발용 전역
-// 핸들(verify 하니스가 호출)과 "m" 키 토글이 공유한다.
+// ── Module singleton + controls ───────────────────────────────────────
+// The HUD feeds a single recorder for the whole lifetime of the mount. Start/stop/export are
+// shared by the dev-only global handle (called by the verify harness) and the "m" key toggle.
 
 const recorder = createMeasurementRecorder();
 const listeners = new Set<() => void>();

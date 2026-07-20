@@ -14,10 +14,12 @@ const plexMono = IBM_Plex_Mono({
   weight: ["400", "500", "600"],
 });
 
-// 한글 라벨("안정"·"신규"·"베이스라인 학습 중")용 폴백 — Plex Sans/Mono의 latin
-// 서브셋 밖이라 시스템 폰트로 떨어지던 글리프를 같은 Plex 계열로 받는다. 폰트
-// 체인에서 Plex 뒤에 서므로 라틴 글리프에는 관여하지 않고, preload: false라
-// 한글이 실제 등장할 때 unicode-range 슬라이스 단위로만 내려온다.
+// Fallback for Korean glyphs in firehose post text (Tape renders raw post bodies, which
+// are arbitrary user content). Those glyphs sit outside the latin subset of Plex Sans/Mono
+// and would otherwise drop to a system font, so we catch them with the same Plex family
+// instead. It sits after Plex in the font chain, so it never touches latin glyphs, and with
+// preload: false it is only downloaded one unicode-range slice at a time, when Korean
+// actually shows up.
 const plexSansKR = IBM_Plex_Sans_KR({
   variable: "--font-kr",
   subsets: ["latin"],
@@ -25,22 +27,22 @@ const plexSansKR = IBM_Plex_Sans_KR({
   preload: false,
 });
 
-// og:image·canonical 같은 URL 필드는 배포 도메인이 정해지면 metadataBase와 함께 추가한다
+// URL fields such as og:image and canonical will be added along with metadataBase once the deployment domain is decided
 export const metadata: Metadata = {
   title: "Jetstream Deck",
-  description: "Bluesky Jetstream 파이어호스 실시간 대시보드",
+  description: "Real-time dashboard for the Bluesky Jetstream firehose",
   openGraph: {
     title: "Jetstream Deck",
     description:
-      "Bluesky Jetstream(공개 WebSocket 파이어호스)을 브라우저에서 직접 구독하는 실시간 대시보드",
+      "A real-time dashboard that subscribes to Bluesky Jetstream (the public WebSocket firehose) directly from the browser",
     type: "website",
     siteName: "Jetstream Deck",
-    locale: "ko_KR",
+    locale: "en_US",
   },
   twitter: {
     card: "summary",
     title: "Jetstream Deck",
-    description: "Bluesky Jetstream 파이어호스 실시간 대시보드",
+    description: "Real-time dashboard for the Bluesky Jetstream firehose",
   },
 };
 
@@ -55,7 +57,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ko" className={`${plexSans.variable} ${plexMono.variable} ${plexSansKR.variable}`}>
+    <html lang="en" className={`${plexSans.variable} ${plexMono.variable} ${plexSansKR.variable}`}>
       <body>{children}</body>
     </html>
   );

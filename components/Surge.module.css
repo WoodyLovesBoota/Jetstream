@@ -8,7 +8,7 @@
   min-height: 0;
 }
 
-/* ── 탭 ─────────────────────────────────────────────────────────── */
+/* ── Tabs ───────────────────────────────────────────────────────── */
 
 .tabs {
   display: flex;
@@ -38,7 +38,7 @@
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
-/* ── 리스트 ──────────────────────────────────────────────────────── */
+/* ── List ───────────────────────────────────────────────────────── */
 
 .listWrap {
   position: relative;
@@ -79,9 +79,10 @@
 }
 
 /*
- * FLIP: 행은 절대 배치 + translateY로만 움직인다(리플로우 없음). 순위 변경은
- * 워커의 5초 재정렬 때만 오므로 400ms 전환이 그때 한 번 부드럽게 흐른다.
- * 신규 바인딩·탭 전환은 data-instant로 전환을 끄고 제자리에 즉시 놓는다.
+ * FLIP: rows are absolutely positioned and move by translateY only (no reflow). Rank
+ * changes arrive only with the worker's 5-second re-sort, so the 400ms transition runs
+ * smoothly once at that moment. New bindings and tab switches use data-instant to turn
+ * the transition off and drop rows straight into place.
  */
 .row {
   position: absolute;
@@ -105,12 +106,12 @@
   transition: none;
 }
 
-/* 빈 순위 행 — 레이아웃은 유지하고 내용만 감춘다 */
+/* Empty rank row — the layout is kept and only the content is hidden */
 .row[data-filled="false"] {
   visibility: hidden;
 }
 
-/* ── 셀 ─────────────────────────────────────────────────────────── */
+/* ── Cells ──────────────────────────────────────────────────────── */
 
 .rank {
   flex: none;
@@ -120,7 +121,7 @@
   color: var(--faint);
 }
 
-/* 순위 변동 ▲n/▼n/– */
+/* Rank movement ▲n/▼n/– */
 .delta {
   flex: none;
   width: 3ch;
@@ -168,12 +169,12 @@
   color: var(--text);
 }
 
-/* 급등 상태의 배수는 강조색 */
+/* The multiplier in the surging state gets the accent color */
 .row[data-life="rising"] .mult {
   color: var(--warn);
 }
 
-/* ── 라이프사이클 칩 — 신규·급등만 유채색, 유지·하강은 저채도 ── */
+/* ── Lifecycle chips — only new and surging are chromatic; holding and falling stay desaturated ── */
 
 .chipCol {
   flex: none;
@@ -211,9 +212,9 @@
   color: var(--faint);
 }
 
-/* ── 워밍업·빈 상태 ──────────────────────────────────────────────── */
+/* ── Warm-up and empty states ───────────────────────────────────── */
 
-/* 급상승 탭 워밍업: 리스트 대신 학습 경과 한 줄 */
+/* Surging tab warm-up: a single line of learning progress instead of the list */
 .warmup {
   display: none;
   position: absolute;
@@ -250,7 +251,7 @@
   display: none;
 }
 
-/* ── 하단 상태줄 — 값은 전부 워커 실측/실설정값 ─────────────────── */
+/* ── Bottom status line — every value is measured or actually configured by the worker ── */
 
 .statusBar {
   display: flex;

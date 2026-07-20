@@ -58,8 +58,8 @@
   width: 100%;
 }
 
-/* 세로 테이프 행: 메타(시각·did·언어) 한 줄 + 본문 2줄 말줄임.
-   높이는 Tape.tsx의 ROW_HEIGHT(56px)와 맞물린 값 — 가상화·스크롤 보정의 기준. */
+/* Vertical tape row: one meta line (time · did · language) + body clamped to 2 lines with an ellipsis.
+   The height is locked to ROW_HEIGHT (56px) in Tape.tsx — the reference for virtualization and scroll correction. */
 .row {
   position: absolute;
   top: 0;

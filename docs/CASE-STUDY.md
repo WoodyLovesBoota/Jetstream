@@ -1,138 +1,153 @@
-# Jetstream Deck — 케이스 스터디 재료
+# Jetstream Deck — Case study
 
-브라우저 단독으로 Bluesky Jetstream 파이어호스를 구독해 초당 수백 이벤트를 받아
-단일 화면에 실시간으로 그리는 대시보드. 서버도, 백엔드 집계도, SharedArrayBuffer도
-쓰지 않는다.
+A dashboard that subscribes to the Bluesky Jetstream firehose entirely in the
+browser, takes in hundreds of events per second, and renders them live on a
+single screen. No server, no backend aggregation, no SharedArrayBuffer.
 
-> **이 문서의 숫자는 전부 실측값이다.** 측정하지 않은 값은 한 줄도 쓰지 않는다
-> (설계 §1). 각 수치에는 측정 방법·구간·일자가 붙어 있고, 원자료는
-> `docs/measurements/*.json`에 그대로 있다.
+> **Every number in this document is measured.** Not a single value that wasn't
+> actually measured appears here (design §1). Each figure carries its measurement
+> method, window, and date, and the raw data lives verbatim in
+> `docs/measurements/*.json`.
 
-목차
-1. [아키텍처 — 수신에서 렌더까지](#1-아키텍처--수신에서-렌더까지)
-2. [백프레셔 3단계](#2-백프레셔-3단계)
-3. [실측 수치 요약](#3-실측-수치-요약)
-4. [데모 시나리오 스크립트](#4-데모-시나리오-스크립트)
-5. [R3 튜닝 — 확정값과 그 근거](#5-r3-튜닝--확정값과-그-근거)
+Contents
+1. [Architecture — from ingest to render](#1-architecture--from-ingest-to-render)
+2. [Three-stage backpressure](#2-three-stage-backpressure)
+3. [Measured-results summary](#3-measured-results-summary)
+4. [Demo scenario script](#4-demo-scenario-script)
+5. [R3 tuning — Final values and rationale](#5-r3-tuning--final-values-and-rationale)
 
 ---
 
-## 1. 아키텍처 — 수신에서 렌더까지
+## 1. Architecture — from ingest to render
 
-문제의 성질: **WebSocket은 푸시 기반이라 명시적 백프레셔가 없다.** 소비가 유입을
-못 따라가면 그 사실이 에러로 나타나지 않고 이벤트 루프 지연으로만 나타난다. 그래서
-설계 전체가 "어디서 줄이고, 줄인 것을 어떻게 정직하게 보고하는가"로 짜여 있다.
+The nature of the problem: **WebSocket is push-based, so there is no explicit
+backpressure.** When consumption can't keep up with the inflow, that fact never
+surfaces as an error — only as event-loop lag. So the whole design is organized
+around one question: where to shed load, and how to report honestly what was shed.
 
 ```
-                        ┌─────────────────────── Web Worker ───────────────────────┐
-                        │                                                           │
-  Jetstream WS ────────▶│  ① degraded 게이트 (1/M 샘플링)                            │
-  (JSON text,           │        │  탈락분 → degradedSkipped                        │
-   ~350-450 evt/s)      │        ▼                                                  │
-                        │     JSON.parse ──▶ 실패 → parseErrors                      │
-                        │        │                                                  │
-                        │        ▼                                                  │
-                        │     중복/스테일 판정 ──▶ replaySkipped · replayStale        │
-                        │        │                                                  │
-                        │        ▼                                                  │
-                        │     집계 (전부 O(1), 전부 고정 크기)                         │
-                        │        ├── rateRing      1초 버킷 × 300 (링)               │
-                        │        ├── rateRing.langs 같은 버킷에 언어 카운트            │
-                        │        ├── gauges        타입별 누적 + EMA + p95/평균        │
-                        │        ├── surgeSlab     토큰 슬롯 50,000 (TypedArray 슬랩) │
-                        │        └── tapeBuffer    ② stride 1/N 샘플링 → 델타 행만    │
-                        │        │                                                  │
-                        │        ▼                                                  │
-                        │     원시 이벤트 폐기 (어디에도 보관하지 않는다)               │
-                        │                                                           │
-                        │     ③ 10Hz 스냅샷 (plain object, 고정 크기)                │
-                        └───────────────────────────┬───────────────────────────────┘
-                                                    │ postMessage — 초당 10개로 고정
+                        ┌─────────────────────────── Web Worker ───────────────────────────┐
+                        │                                                                  │
+  Jetstream WS ────────▶│  ① degraded gate (1/M sampling)                                  │
+  (JSON text,           │        │  dropped → degradedSkipped                              │
+   ~350-450 evt/s)      │        ▼                                                         │
+                        │     JSON.parse ──▶ fail → parseErrors                            │
+                        │        │                                                         │
+                        │        ▼                                                         │
+                        │     dedup/stale check ──▶ replaySkipped · replayStale            │
+                        │        │                                                         │
+                        │        ▼                                                         │
+                        │     Aggregation (all O(1), all fixed-size)                       │
+                        │        ├── rateRing       1s buckets × 300 (ring)                │
+                        │        ├── rateRing.langs language counts in same bucket         │
+                        │        ├── gauges         per-type totals + EMA + p95/avg        │
+                        │        ├── surgeSlab      token slots 50,000 (TypedArray slab)   │
+                        │        └── tapeBuffer     ② stride 1/N sampling → delta rows only│
+                        │        │                                                         │
+                        │        ▼                                                         │
+                        │     Discard raw events (kept nowhere)                            │
+                        │                                                                  │
+                        │     ③ 10Hz snapshot (plain object, fixed-size)                   │
+                        └───────────────────────────┬──────────────────────────────────────┘
+                                                    │ postMessage — fixed at 10/s
                                                     ▼
-                        ┌──────────────────── Main Thread ─────────────────────────┐
-                        │  snapshotRef.current = snapshot   (교체가 전부)            │
-                        │        │                                                  │
-                        │        ▼   rAF 틱                                          │
-                        │   ┌────┴─────────────────────────────────────────┐        │
-                        │   │ Gauges  transform: scaleY (리플로우 없음)      │        │
-                        │   │ Pulse   uPlot setData (인스턴스 1회 생성)      │        │
-                        │   │ Surge   행 풀 재사용 + FLIP translateY 400ms   │        │
-                        │   │ Tape    가상화(TanStack) · 링 상한 2,000행     │        │
-                        │   │ Mix     막대 9개 width 갱신                    │        │
-                        │   │ HUD     textContent 직접 갱신 (Pause의 예외)   │        │
-                        │   └──────────────────────────────────────────────┘        │
-                        └──────────────────────────────────────────────────────────┘
+                        ┌────────────────────────── Main Thread ───────────────────────────┐
+                        │  snapshotRef.current = snapshot   (the swap is all)              │
+                        │        │                                                         │
+                        │        ▼   rAF tick                                              │
+                        │   ┌────┴────────────────────────────────────────────┐            │
+                        │   │ Gauges  transform: scaleY (no reflow)           │            │
+                        │   │ Pulse   uPlot setData (single instance)         │            │
+                        │   │ Surge   row pool reuse + FLIP translateY 400ms  │            │
+                        │   │ Tape    virtualized (TanStack) · 2,000-row cap  │            │
+                        │   │ Mix     9 bars, width updates                   │            │
+                        │   │ HUD     textContent direct write (except Pause) │            │
+                        │   └─────────────────────────────────────────────────┘            │
+                        └──────────────────────────────────────────────────────────────────┘
 
-  ①②③ = 백프레셔 3단계 (§2)
+  ①②③ = three-stage backpressure (§2)
 ```
 
-핵심 불변식 네 가지:
+Four core invariants:
 
-| 불변식 | 왜 |
+| Invariant | Why |
 |---|---|
-| 워커가 수신·파싱·집계를 전부 한다 | 메인 스레드를 데이터 경로에서 완전히 뺀다 |
-| 스냅샷은 10Hz 고정 | 유입이 몇이든 스레드 경계를 넘는 메시지 수가 상수 |
-| 메인 스레드는 그리기만 | React 리렌더는 저빈도 컨트롤에만 허용 |
-| 버리는 곳마다 카운터 | 조용한 손실 금지 — 모든 폐기 지점이 HUD에 노출 |
+| The worker does all ingest, parsing, and aggregation | Keeps the main thread entirely off the data path |
+| Snapshots are fixed at 10Hz | The number of messages crossing the thread boundary is constant regardless of inflow |
+| The main thread only draws | React re-renders are allowed only for low-frequency controls |
+| A counter at every discard point | No silent loss — every discard point is exposed in the HUD |
 
-집계 구조가 **전부 고정 크기**라는 점이 이 설계의 축이다. 이벤트당 작업이 O(1)이고
-스냅샷 생성이 O(스냅샷 크기)로 묶이므로, 유입이 늘어도 메모리와 스냅샷 비용은 자라지
-않는다 — §3의 상한 실측이 그 결과다.
+The axis of this design is that the aggregation structures are **all fixed-size**.
+Per-event work is O(1) and snapshot generation is bounded by O(snapshot size), so
+memory and snapshot cost don't grow as inflow rises — the upper-bound measurements
+in §3 are the result.
 
 ---
 
-## 2. 백프레셔 3단계
+## 2. Three-stage backpressure
 
-줄일 수 있는 지점마다 단을 하나씩 세웠다. 위로 갈수록 싸고, 아래로 갈수록 아프다.
+We placed one stage at every point where load can be shed. The higher up, the
+cheaper; the further down, the more it hurts.
 
-| 단계 | 줄이는 것 | 장치 | 관측점 | 성격 |
+| Stage | What it sheds | Mechanism | Observation point | Character |
 |---|---|---|---|---|
-| **1** | 메인 스레드로 가는 메시지 | 10Hz 고정 스냅샷 | HUD `snap` | 상시 · 무손실 |
-| **2** | 화면에 append하는 행 | Tape stride 1/N | `showing 1 in N` | 상시 · 표시량만 |
-| **3** | **파싱 자체** | degraded 1/M 샘플링 | `degraded` 배너 + `drop/s` | 비상 · 실손실 |
+| **1** | Messages to the main thread | Fixed 10Hz snapshot | HUD `snap` | Always on · lossless |
+| **2** | Rows appended to the screen | Tape stride 1/N | `showing 1 in N` | Always on · display volume only |
+| **3** | **Parsing itself** | degraded 1/M sampling | `degraded` banner + `drop/s` | Emergency · real loss |
 
-1·2단계는 "표시량"만 줄이므로 워커의 파싱 부하는 그대로다. 유입 자체가 처리 능력을
-넘어서면 남는 수단은 파싱을 건너뛰는 것뿐이고, 그게 3단계다.
+Stages 1 and 2 reduce only the "display volume," so the worker's parsing load is
+unchanged. Once the inflow itself exceeds processing capacity, the only remaining
+option is to skip parsing — and that is stage 3.
 
-3단계 설계에서 실측으로 뒤집힌 판단 네 가지:
+Four design decisions in stage 3 that measurement overturned:
 
-- **판정은 큐 깊이가 아니라 투영 이용률.** WebSocket에는 수신 큐 깊이를 물어볼 API가
-  없다. `utilization = (틱 사이 수신 프레임 수 × 프레임당 실측 비용) / 실경과시간`을
-  쓰고, 예산은 1.0이 아니라 **0.6**(나머지는 스냅샷 생성·Surge 정리·타이머 몫).
-  `M = ⌈utilization / 예산⌉`, 상한 64.
-- **분자는 수신 전량이지 파싱한 수가 아니다.** 실제 소비량으로 판정하면 샘플링이 부하를
-  낮추는 순간 판정이 뒤집혀 진입·복귀를 반복한다(플래핑).
-- **게이트는 `JSON.parse` 앞.** 파싱한 뒤 버리면 줄이려던 비용을 그대로 치른다.
-- **시간 상수로 감은 EMA·히스테리시스.** 계수를 틱당 상수로 두면 워커가 포화돼 틱이
-  늦어질 때 평활까지 느려진다 — 하필 과부하일 때 판정이 굼떠지는 구조다. 매 틱
-  실경과시간으로 `α = 1 − e^(−Δt/τ)`를 다시 구한다.
-- **타이머 기아 자가진단.** 유입이 능력을 크게 넘어서면 수신 콜백이 이벤트 루프를 독점해
-  `setInterval`이 통째로 굶는다. 판정을 타이머에만 두면 degraded는 가장 필요한 순간에
-  작동하지 않는다. 그래서 프레임 경로가 16프레임마다 "마지막 틱이 500ms 넘게 전인가"를
-  직접 보고, 그렇다면 타이머를 기다리지 않고 M을 즉시 배가한다.
+- **The decision is driven by projected utilization, not queue depth.** WebSocket
+  offers no API to query the receive-queue depth. We use
+  `utilization = (frames received between ticks × measured cost per frame) / actual elapsed time`,
+  with a budget of **0.6** rather than 1.0 (the rest is reserved for snapshot
+  generation, Surge cleanup, and timers). `M = ⌈utilization / budget⌉`, capped at 64.
+- **The numerator is the total received, not the number parsed.** If the decision
+  keyed on actual consumption, the moment sampling lowered the load the decision
+  would flip, cycling in and out (flapping).
+- **The gate sits before `JSON.parse`.** Discarding after parsing would pay the
+  exact cost we were trying to avoid.
+- **EMA and hysteresis wound around a time constant.** If the coefficient were a
+  per-tick constant, then when the worker saturates and ticks slow down, the
+  smoothing would slow too — precisely the wrong moment for the decision to get
+  sluggish. Every tick we recompute `α = 1 − e^(−Δt/τ)` from the actual elapsed time.
+- **Timer-starvation self-diagnosis.** When inflow greatly exceeds capacity, the
+  receive callback monopolizes the event loop and `setInterval` starves entirely.
+  If the decision lived on the timer alone, degraded would fail to fire at the exact
+  moment it's needed most. So the frame path checks, every 16 frames, whether "the
+  last tick was more than 500ms ago," and if so it doubles M immediately without
+  waiting for the timer.
 
-**정직성 규칙:** degraded 중에는 샘플링에서 탈락한 이벤트가 버킷에 들어가지 않으므로
-Pulse의 처리량이 실제보다 낮게 그려진다. M을 곱해 보정하지 **않는다** — 측정한 값만
-표시한다. 대신 `degraded` 배너와 치솟는 `drop/s`가 그 이유를 댄다.
+**Honesty rule:** during degraded, events dropped by sampling never enter the
+buckets, so Pulse draws throughput lower than reality. We do **not** correct for
+this by multiplying by M — only the measured value is shown. Instead, the
+`degraded` banner and a spiking `drop/s` explain why.
 
 ---
 
-## 3. 실측 수치 요약
+## 3. Measured-results summary
 
-**측정 장비·방법 (전 구간 공통, 2026-07-18)**
+**Measurement setup and method (common to all runs, 2026-07-18)**
 
-- headless Chromium(Google Chrome for Testing), 뷰포트 1600×1000 — 단일 화면 레이아웃
-- 화면 상태: 게이지 스트립(R2)·Pulse·Surge FLIP(R4)·Tape·Mix·HUD **전 패널 렌더 중**
-- 계측: 앱 내장 **측정 모드**(`lib/perf/measurement.ts`). HUD의 rAF 루프가 프레임 간격을
-  매 틱, 스냅샷 실측 카운터를 벽시계 초마다 먹여 60초 창으로 묶는다. 창 롤오버는
-  `performance.now()` 기준이라 CPU 스로틀링에 영향받지 않는다(60초는 실제 60초).
-- 원자료: `docs/measurements/p9-throttle-degraded.json`
+- headless Chromium (Google Chrome for Testing), viewport 1600×1000 — single-screen layout
+- Screen state: gauge strip (R2), Pulse, Surge FLIP (R4), Tape, Mix, HUD — **all panels rendering**
+- Instrumentation: the app's built-in **measurement mode** (`lib/perf/measurement.ts`).
+  The HUD's rAF loop feeds frame intervals every tick and the snapshot's measured
+  counters every wall-clock second, grouping them into 60-second windows. Window
+  rollover is based on `performance.now()`, so it's unaffected by CPU throttling
+  (60 seconds means a real 60 seconds).
+- Raw data: `docs/measurements/p9-throttle-degraded.json`
 
-### 3.1 저사양(CPU 스로틀) — 풀 스트림
+### 3.1 Low-end (CPU throttle) — full stream
 
-CDP `Emulation.setCPUThrottlingRate`로 배율을 걸고 각 180초(60초 창 3개) 구동.
+Applied a throttle multiplier via CDP `Emulation.setCPUThrottlingRate` and ran each
+for 180 seconds (three 60-second windows).
 
-| 배율 | 창 | recv/s p50 | recv/s p95 | drop/s p50 | frame p50 | **frame p95** | frame p99 | frame max | 프레임 표본 |
+| Rate | Window | recv/s p50 | recv/s p95 | drop/s p50 | frame p50 | **frame p95** | frame p99 | frame max | Frame samples |
 |---|---|---|---|---|---|---|---|---|---|
 | 4x | w0 | 387 | 431 | 35 | 8.3ms | **10.1ms** | 10.3ms | 16.6ms | 7,199 |
 | 4x | w1 | 407 | 449 | 34 | 8.3ms | **10.1ms** | 10.3ms | 18.1ms | 7,197 |
@@ -141,337 +156,371 @@ CDP `Emulation.setCPUThrottlingRate`로 배율을 걸고 각 180초(60초 창 3�
 | 6x | w1 | 377 | 414 | 30 | 8.3ms | **9.4ms** | 17.0ms | 25.4ms | 6,867 |
 | 6x | w2 | 379 | 426 | 29 | 8.3ms | **15.7ms** | 16.9ms | 33.1ms | 6,852 |
 
-전 구간 **degraded 0초 · M=1 · load 0~1%**.
+Across all runs: **degraded 0s · M=1 · load 0–1%**.
 
-읽는 법 세 가지:
+Three ways to read this:
 
-1. **프레임 중앙값이 배율에 반응하지 않는다.** 4x든 6x든 p50이 8.3ms로 같다(이 브라우저의
-   rAF는 120Hz라 8.3ms가 곧 프레임 예산 전부를 맞췄다는 뜻). 데이터 경로가 워커에 있어
-   메인 스레드가 rAF마다 하는 일은 "이미 만들어진 스냅샷을 읽어 그리기"뿐이기 때문이다.
-2. **저사양의 대가는 지속적 끊김이 아니라 간헐적 프레임 누락이다.** 6x에서 프레임 표본이
-   창당 7,200 → 6,852로 약 5% 줄고 p99가 10.3ms → 17ms로 올라간다. p50은 그대로다.
-3. **스로틀만으로는 degraded가 켜지지 않는다.** 파싱 예산 대비 부하가 0~1%에 머문다 —
-   초당 수백 건의 작은 JSON을 파싱하는 비용은 6배 느린 CPU에서도 예산 근처에 못 간다.
-   그래서 3단계의 개입은 §3.2처럼 처리 지연을 주입해 확인해야 한다.
+1. **The median frame time doesn't respond to the throttle rate.** At 4x or 6x, p50
+   is the same 8.3ms (this browser's rAF runs at 120Hz, so 8.3ms means the full frame
+   budget was met). This is because the data path lives in the worker, so all the main
+   thread does per rAF is "read an already-built snapshot and draw it."
+2. **The cost of a low-end device is not sustained stutter but intermittent dropped
+   frames.** At 6x, frame samples per window fall about 5%, from 7,200 to 6,852, and
+   p99 rises from 10.3ms to 17ms. p50 stays put.
+3. **Throttling alone never triggers degraded.** Load against the parsing budget stays
+   at 0–1% — the cost of parsing a few hundred small JSON messages per second doesn't
+   come near the budget even on a 6×-slower CPU. So the stage-3 intervention has to be
+   verified by injecting processing delay, as in §3.2.
 
-### 3.2 degraded 개입 — 처리 지연 주입
+### 3.2 degraded intervention — processing-delay injection
 
-`__jetstreamDebug.stall(perFrameUs, durationMs)`로 프레임당 CPU를 실제로 태워
-"유입 > 처리 능력"을 만든다. 스로틀 1x, 필터 `full`, 250ms 간격 폴링 타임라인.
+Using `__jetstreamDebug.stall(perFrameUs, durationMs)` to actually burn CPU per frame,
+we create "inflow > processing capacity." Throttle 1x, filter `full`, timeline polled
+at 250ms intervals.
 
-| 주입 | 진입 | 최대 M | 최대 load | 최대 틱 지연 | drop/s 최대 | 자동 복귀 |
+| Injection | Entry | Max M | Max load | Max tick lag | Max drop/s | Auto-recovery |
 |---|---|---|---|---|---|---|
-| 4ms/프레임 × 15s | 주입 **+1.26s** | 3 | 284% | 271.9ms | 409 | 주입 종료 **+3.34s** |
-| 20ms/프레임 × 12s | 주입 **+2.02s** | 29 | 2,843% | 1,222.2ms | 2,065 | 주입 종료 **+5.38s** |
+| 4ms/frame × 15s | injection **+1.26s** | 3 | 284% | 271.9ms | 409 | injection end **+3.34s** |
+| 20ms/frame × 12s | injection **+2.02s** | 29 | 2,843% | 1,222.2ms | 2,065 | injection end **+5.38s** |
 
-> 설계 문서(§3, P8)의 같은 표는 진입 3s·최대 M 17(20ms 주입)이다. 이번이 더 빠르고 M이
-> 큰 이유는 그때가 **필터 스트림 ~230 evt/s**, 이번이 **풀 스트림 ~400 evt/s**라서다.
-> 유입이 클수록 투영 이용률이 빨리·크게 올라간다 — 같은 산식의 다른 입력이다.
+> The same table in the design doc (§3, P8) shows entry at 3s and max M 17 (for the
+> 20ms injection). The reason this run is faster and reaches a larger M is that back
+> then it was the **filtered stream at ~230 evt/s**, whereas this is the **full stream
+> at ~400 evt/s**. The larger the inflow, the faster and higher projected utilization
+> climbs — same formula, different input.
 
-**제어 루프가 실제로 무엇을 교환했는가** (20ms 케이스, 250ms 표본):
+**What the control loop actually traded** (20ms case, 250ms samples):
 
-| 시각 | M | load | 틱 지연 | recv/s | drop/s |
+| Time | M | load | Tick lag | recv/s | drop/s |
 |---|---|---|---|---|---|
-| 주입 직전 | 1 | 1% | 0.4ms | 439 | 30 |
-| +2.0s (진입) | 2 | 195% | **1,202.6ms** | 506 | 73 |
-| +5.3s (M 최대) | 29 | 2,843% | 256.0ms | 2,356 | 2,065 |
+| Just before injection | 1 | 1% | 0.4ms | 439 | 30 |
+| +2.0s (entry) | 2 | 195% | **1,202.6ms** | 506 | 73 |
+| +5.3s (M peak) | 29 | 2,843% | 256.0ms | 2,356 | 2,065 |
 | +7.3s | 16 | 1,590% | 25.4ms | 425 | 401 |
 | +9.8s | 14 | 1,373% | **5.6ms** | 393 | 366 |
-| 종료 +5.4s (복귀) | 1 | 11% | 0.8ms | 397 | 142 |
+| end +5.4s (recovery) | 1 | 11% | 0.8ms | 397 | 142 |
 
-틱 지연이 1,202ms에서 한 자릿수 ms로 무너지는 동안 drop/s가 2,065까지 치솟는다.
-**이 표가 곧 3단계의 정의다 — 데이터를 버려 응답성을 산다.** 그리고 그 거래를 숨기지
-않는다: 같은 순간 HUD에 `DEGRADED / parsing 1 in 29 · load 2843%` 배너가 떠 있다.
+As tick lag collapses from 1,202ms to single-digit milliseconds, drop/s spikes to
+2,065. **This table is the very definition of stage 3 — we spend data to buy
+responsiveness.** And we don't hide the trade: at that same moment the HUD shows a
+`DEGRADED / parsing 1 in 29 · load 2843%` banner.
 
-**타이머 기아가 실측으로 잡혔다.** 20ms 주입 직후 2,758ms·3,261ms·3,766ms 세 표본의
-값이 완전히 동일하다(load 18% · lag 95.5ms · cost 2,830µs). 표본 오류가 아니라 **스냅샷
-틱이 약 1초간 통째로 굶어 값이 갱신되지 않은 것**이다 — 수신 콜백이 이벤트 루프를 독점하면
-`setInterval`이 서지 못한다. 판정을 타이머에만 뒀다면 degraded는 가장 필요한 이 순간에
-잠들어 있었을 것이고, 그래서 프레임 경로가 16프레임마다 틱 지연을 직접 보고 M을 즉시
-배가하는 자가진단이 들어가 있다(`DEGRADE_STARVE_MS`).
+**Timer starvation was caught in the measurements.** Right after the 20ms injection,
+three samples at 2,758ms, 3,261ms, and 3,766ms are completely identical
+(load 18% · lag 95.5ms · cost 2,830µs). This isn't a sampling error — **the snapshot
+tick starved entirely for about a second, so the values were never refreshed**: when
+the receive callback monopolizes the event loop, `setInterval` can't run. Had the
+decision lived on the timer alone, degraded would have been asleep at the very moment
+it was needed most, which is why the frame path carries a self-diagnosis that reads
+tick lag directly every 16 frames and doubles M immediately (`DEGRADE_STARVE_MS`).
 
-### 3.3 워커가 포화돼도 메인 스레드는 흔들리지 않는다
+### 3.3 The main thread stays steady even when the worker saturates
 
-같은 stall 구간에서 **메인 스레드 프레임 시간**:
+Over the same stall window, **main-thread frame times**:
 
-| 케이스 | 워커 최대 load | 워커 최대 틱 지연 | frame p50 | frame p95 | frame max |
+| Case | Worker max load | Worker max tick lag | frame p50 | frame p95 | frame max |
 |---|---|---|---|---|---|
-| 4ms 주입 | 284% | 271.9ms | 8.3ms | 9.2ms | 10.8ms |
-| 20ms 주입 | 2,843% | 1,222.2ms | 8.3ms | 9.9ms | 10.8ms |
+| 4ms injection | 284% | 271.9ms | 8.3ms | 9.2ms | 10.8ms |
+| 20ms injection | 2,843% | 1,222.2ms | 8.3ms | 9.9ms | 10.8ms |
 
-워커가 예산의 **28배**로 밀리고 스냅샷 틱이 1.2초씩 늦는 동안에도 메인 스레드의 프레임
-p95는 10ms 아래다. 스레드 경계를 넘는 것이 초당 10개의 고정 크기 스냅샷뿐이라, 워커의
-포화가 렌더러로 전파될 경로 자체가 없다. **이 표가 "워커가 전부 처리한다"는 불변식이
-사 온 것이다.**
+Even while the worker is pushed to **28× its budget** and the snapshot tick runs 1.2
+seconds late, the main thread's frame p95 stays under 10ms. Since all that crosses the
+thread boundary is ten fixed-size snapshots per second, there is simply no path for
+the worker's saturation to propagate to the renderer. **This table is what the "the
+worker does everything" invariant bought.**
 
 ---
 
-### 3.4 장시간 소크 — 고정 크기가 실제로 고정인가
+### 3.4 Long soak — is fixed-size actually fixed
 
-**구동 15분(900초)**, 필터 `filtered`(기본 운용 모드), CPU 스로틀 없음.
-측정 모드 60초 창 15개 + 10초 간격 상한 표본 90개.
-원자료: `docs/measurements/p9-soak.json`
+**15-minute run (900 seconds)**, filter `filtered` (the default operating mode), no
+CPU throttle. Fifteen 60-second measurement-mode windows plus 90 upper-bound samples
+at 10-second intervals. Raw data: `docs/measurements/p9-soak.json`
 
-> 브리프는 1시간을 제안했지만 이번 라운드는 **실제로 15분을 돌렸고**, 아래 수치는 전부 그
-> 15분에서 나온 것이다. 상한이 걸리는 경계(링 300초, 테이프 2,000행, 토큰 압력 밸브)는
-> 모두 이 구간 안에서 여러 번 관측된다 — 다만 "1시간 무결"을 주장하지는 않는다.
+> The brief suggested an hour, but this round **actually ran for 15 minutes**, and
+> every number below comes from those 15 minutes. The boundaries where the caps engage
+> (the 300-second ring, the 2,000-row tape, the token pressure valve) are all observed
+> multiple times within this window — we just don't claim "one hour clean."
 
-**고정 크기 구조 — 셋 다 상한에서 멈춘다**
+**Fixed-size structures — all three stop at their cap**
 
-| 구조 | 상한 | 실측 | 판정 |
+| Structure | Cap | Measured | Verdict |
 |---|---|---|---|
-| `rateRing` 버킷 수 | 300 | 90표본 전부 **300** (다른 값이 관측되지 않음) | 고정 |
-| Tape 행 (메인 스레드 링) | 2,000 | 150초에 2,000 도달, 이후 **76/90 표본에서 정확히 2,000** | 상한에서 정지 |
-| Surge 토큰 테이블 | 50,000 | 최대 **42,794 (85.6%)**, **`dropped` 0** | 상한에 닿기 전 회수 |
+| `rateRing` bucket count | 300 | all 90 samples **300** (no other value observed) | fixed |
+| Tape rows (main-thread ring) | 2,000 | reaches 2,000 at 150s, then **exactly 2,000 in 76/90 samples** | stops at cap |
+| Surge token table | 50,000 | peak **42,794 (85.6%)**, **`dropped` 0** | reclaimed before hitting the cap |
 
-Tape가 2,000 미만인 표본 14개는 전부 채워지는 중이던 초반 구간이다. 도달 이후로는
-한 번도 2,000을 넘지 않고, 넘으려는 분량은 오래된 행부터 폐기된다.
+The 14 samples where the Tape is under 2,000 are all from the early period while it was
+still filling. After it reaches the cap it never exceeds 2,000, and anything that would
+overflow is discarded oldest-first.
 
-**압력 밸브가 세 번 열렸다** — 토큰 테이블이 상한에 닿지 **않는** 이유
+**The pressure valve opened three times** — why the token table **never** hits its cap
 
-정리 패스는 위생 TTL(무활동 10분)로 퇴출하되, 점유율이 85%(=42,500)를 넘으면 TTL을
-반씩 조여 상한 아래로 회수한다. 15분 동안 정확히 그 지점에서 세 번 발동했다:
+The cleanup pass evicts on a hygiene TTL (10 minutes of inactivity), but once occupancy
+exceeds 85% (= 42,500) it tightens the TTL by half to reclaim back under the cap. Over
+15 minutes it fired at exactly that point three times:
 
-| 시각 | tracked | TTL | 회수 |
+| Time | tracked | TTL | Reclaimed |
 |---|---|---|---|
 | 450s | 42,794 → 34,691 | 600s → **300s** | −8,103 (evict +8,892) |
 | 570s | 42,361 → 29,298 | 480s → **240s** | −13,063 (evict +13,671) |
 | 780s | 42,575 → 31,339 | 600s → **300s** | −11,236 (evict +11,941) |
 
-발동 후 점유율이 내려가면 TTL이 300 → 360 → 420 → 480 → 540 → 600으로 다시 이완한다
-(관측된 TTL 값: 240·300·360·420·480·540·600). 즉 **TTL은 위생 값(600s)을 넘지 않으므로
-죽은 토큰이 슬롯을 영영 물지 않고, 압력이 높을 때만 조여진다.** 누적 퇴출 34,504건 동안
-`dropped`는 끝까지 **0** — 만석으로 추적을 놓친 신규 토큰이 한 건도 없었다는 뜻이다.
+Once occupancy falls after firing, the TTL relaxes back through
+300 → 360 → 420 → 480 → 540 → 600 (observed TTL values: 240 · 300 · 360 · 420 · 480 ·
+540 · 600). In other words, **the TTL never exceeds the hygiene value (600s), so a dead
+token never holds a slot forever, and it only tightens under pressure.** Across 34,504
+cumulative evictions, `dropped` stayed at **0** the whole time — meaning not a single
+new token was lost to a full table.
 
-**JS 힙 — 증가 추세가 없다**
+**JS heap — no upward trend**
 
-| 지표 | 값 |
+| Metric | Value |
 |---|---|
-| `usedJSHeapSize` 범위 | 13.9 – 29.6 MB |
-| 전반 1/4 평균 | 20.9 MB |
-| 후반 1/4 평균 | 21.4 MB |
-| 차 | **+0.5 MB** |
+| `usedJSHeapSize` range | 13.9 – 29.6 MB |
+| First-quarter average | 20.9 MB |
+| Last-quarter average | 21.4 MB |
+| Difference | **+0.5 MB** |
 
-15분에 걸친 전후 평균 차이가 0.5MB로, GC 톱니의 진폭(약 15MB)보다 훨씬 작다.
-**증가 추세로 볼 수 없다** — 원시 이벤트를 어디에도 쌓지 않고 집계 구조가 전부 고정
-크기라는 설계가 힙에서 그대로 확인된다. (단, 이는 15분 구간의 관측이며 더 긴 지평의
-누수 부재를 증명하지는 않는다.)
+The before/after average difference across 15 minutes is 0.5MB, far smaller than the
+amplitude of the GC sawtooth (about 15MB). **This can't be read as an upward trend** —
+the design of never accumulating raw events anywhere and keeping every aggregation
+structure fixed-size shows up directly in the heap. (That said, this is an observation
+over a 15-minute window and does not prove the absence of leaks over a longer horizon.)
 
-**렌더는 15분 내내 흔들리지 않았다**
+**Rendering never wavered across the full 15 minutes**
 
-60초 창 15개 전부에서 `frame p50 8.3ms · p95 9.9~10.0ms`, 창당 프레임 표본 약 7,199개,
-degraded 0초. 압력 밸브가 1만 개 넘는 토큰을 회수하는 순간에도 프레임 통계가 다른 창과
-구분되지 않는다 — 정리 패스가 30초 주기의 워커 작업이라 렌더러에 닿지 않기 때문이다.
+Across all fifteen 60-second windows: `frame p50 8.3ms · p95 9.9~10.0ms`, about 7,199
+frame samples per window, degraded 0s. Even at the moment the pressure valve reclaims
+more than 10,000 tokens, the frame statistics are indistinguishable from any other
+window — because the cleanup pass is a worker task on a 30-second cycle and never
+touches the renderer.
 
 ---
 
-## 4. 데모 시나리오 스크립트
+## 4. Demo scenario script
 
-정상 → 풀 스트림 → 강제 단절 → 복구 → degraded 순서로, 끊김 없이 이어서 시연한다.
-전 구간 dev 빌드 · 창 너비 ≥1280px(단일 화면 레이아웃) 기준.
+Demo it as one continuous, uninterrupted flow: Normal → full stream → forced
+disconnect → recovery → degraded. Throughout, assume a dev build and a window width
+≥1280px (single-screen layout).
 
-### 0. 준비
+### 0. Setup
 
 ```bash
 pnpm dev          # http://localhost:3000
 ```
 
-브라우저 콘솔에서 쓰는 핸들 두 개:
+Two handles you use from the browser console:
 - `__jetstreamDebug` — drop / stall / filter / pause / connect / disconnect
-- `__jetstreamMeasureCtl` — start / stop / export / json  (또는 화면에서 **"m" 키**)
+- `__jetstreamMeasureCtl` — start / stop / export / json  (or the **"m" key** on screen)
 
-> DevTools의 오프라인 토글은 **이미 열린 WebSocket을 끊지 못한다**(수신만 멈춘다).
-> 그래서 단절 재현은 반드시 `__jetstreamDebug.drop()`을 쓴다.
+> The DevTools offline toggle **can't sever an already-open WebSocket** (it only stops
+> incoming data). So to reproduce a disconnect, always use `__jetstreamDebug.drop()`.
 
-### 1. 정상 — "계기판이 살아 있다"
+### 1. Normal — "the instrument panel is alive"
 
-| 볼 것 | 기대 |
+| What to watch | Expected |
 |---|---|
-| 헤더 배지 | `live` (녹색 점) |
-| 게이지 4셀 | post/like/repost/follow 채움이 1초마다 플러시 후 재충전 |
-| Pulse | 5개 시리즈 스택 영역, 우측 끝 현재값 라벨 |
-| Tape | 최신 행이 위로 쌓임, 상태줄 `showing 1 in N` |
-| Mix | 상위 8개 언어 + other, 막대 합 = 표본 수 |
+| Header badge | `live` (green dot) |
+| Gauge 4 cells | post/like/repost/follow fills flush every second, then refill |
+| Pulse | 5-series stacked area, current-value labels at the right edge |
+| Tape | newest rows stack on top, status line `showing 1 in N` |
+| Mix | top 8 languages + other, bar total = sample count |
 | HUD | `recv/s`, `proc/s`, `drop/s`, `frame p95`, `ws live 0.0s` |
 
-말할 것: **"이 화면의 모든 숫자는 워커가 실측한 값이다. 추정치가 없다."**
+What to say: **"Every number on this screen is a value the worker measured. Nothing is estimated."**
 
-### 2. 풀 스트림 토글 — "관측점을 바꾼다"
+### 2. Full-stream toggle — "switch the observation point"
 
-헤더의 `filtered` 버튼 클릭 (또는 `__jetstreamDebug.filter("full")`).
+Click the `filtered` button in the header (or `__jetstreamDebug.filter("full")`).
 
-| 볼 것 | 기대 |
+| What to watch | Expected |
 |---|---|
-| 버튼 라벨 | `full stream` — 근거는 낙관적 로컬 상태가 아니라 스냅샷의 `conn.filter` |
-| HUD `cols 10s` | **6 → 20~29** ← 이게 진짜 관측점 |
-| Pulse `other` 밴드 | 눈에 띄게 두꺼워짐 |
-| `gaps` | 비어 있음 — 의도된 재연결이라 갭 마커를 남기지 않는다 |
+| Button label | `full stream` — sourced from the snapshot's `conn.filter`, not optimistic local state |
+| HUD `cols 10s` | **6 → 20~29** ← this is the real observation point |
+| Pulse `other` band | visibly thicker |
+| `gaps` | empty — an intentional reconnect leaves no gap marker |
 
-말할 것: **"`recv/s`로 검증하면 안 된다."** 기본 필터가 이미 파이어호스의 약 89%를
-덮고 있어 필터를 풀어도 유입은 +12% 남짓이라 1초 창의 정상 요동(±10%)에 묻힌다.
-컬렉션 **종류**는 뚜렷하게 갈린다 — 그래서 관측점을 `cols 10s`로 옮겼다.
-(직접 프로브 실측 2026-07-18 js2.us-east: `feed.*`+`follow` 226 evt/s·6종 vs
-전체 253 evt/s·25종. 데크의 `cols 10s`는 토글 후 **6 → 20·21**로 관측됐고, 더 오래
-두면 29까지 올라간다 — 창이 10초라 희귀 컬렉션이 잡히는 데 시간이 걸린다.)
+What to say: **"Don't verify this with `recv/s`."** The default filter already covers
+about 89% of the firehose, so lifting it adds only about +12% to the inflow — which
+gets buried in the normal ±10% jitter of a one-second window. The **kinds** of
+collections, however, split sharply — which is why we moved the observation point to
+`cols 10s`. (Direct probe measurement, 2026-07-18, js2.us-east: `feed.*`+`follow` at
+226 evt/s across 6 kinds vs. 253 evt/s across 25 kinds overall. The deck's `cols 10s`
+was observed going **6 → 20·21** after the toggle, and climbs to 29 if left longer —
+because the window is 10 seconds, rare collections take time to show up.)
 
-### 3. 강제 단절 — "끊어도 거짓말하지 않는다"
+### 3. Forced disconnect — "it doesn't lie even when disconnected"
 
 ```js
-__jetstreamDebug.drop(30000)   // 30초간 재연결 시도까지 실패시킨다
+__jetstreamDebug.drop(30000)   // fail even reconnect attempts for 30 seconds
 ```
 
-| 볼 것 | 기대 |
+| What to watch | Expected |
 |---|---|
-| 배지 | `reconnecting 1` → `2` → … (지수 백오프 1s→2s→4s…, ±20% 지터) |
-| HUD `ws` | 다음 시도까지 남은 초가 카운트다운 |
-| Pulse | 단절 구간에 **붉은 갭 띠** |
+| Badge | `reconnecting 1` → `2` → … (exponential backoff 1s→2s→4s…, ±20% jitter) |
+| HUD `ws` | counts down the seconds until the next attempt |
+| Pulse | a **red gap band** over the disconnected span |
 | HUD `recv/s` | 0 |
 
-말할 것: 재시도 간격이 실제로 벌어지는 것이 화면에 보인다. 인스턴스가 2회 연속
-실패하면 다음 공식 인스턴스로 페일오버한다(us-east 2대 → us-west 2대 순환).
+What to say: you can see the retry interval actually widening on screen. After an
+instance fails twice in a row, it fails over to the next official instance (cycling
+through 2 us-east then 2 us-west).
 
-> `failed` 상태까지 보이려면 단절을 오래 끌어야 한다 — **실측 95초**(2026-07-18):
-> attempt 8 · failovers 4에서 켜졌고, 그 사이 인스턴스가 js2.us-east → js1.us-east →
-> js1.us-west → js2.us-west로 순환하며 백오프가 1 → 2 → 5 → 11 → 30 → 30초로 벌어졌다.
-> 그때 **에러 상태 오버레이**가 뜬다: `SIGNAL LOST` + 인스턴스 + `cycled all instances ·
-> attempt 8 · retrying in 23s`(카운트다운 라이브). 헤더 배지 `FAILED 8`, HUD `failed(8)`,
-> Pulse의 붉은 갭 띠까지 같은 danger 톤으로 묶인다.
-> 데모에서는 보통 30초로 끊고 복구를 보여주는 편이 낫다 — `failed`는 95초를 기다려야 한다.
+> To see the `failed` state, you have to drag the disconnect out for a while —
+> **measured 95 seconds** (2026-07-18): it kicked in at attempt 8 · failovers 4, during
+> which the instance cycled through js2.us-east → js1.us-east → js1.us-west →
+> js2.us-west and the backoff widened through 1 → 2 → 5 → 11 → 30 → 30 seconds. At that
+> point an **error-state overlay** appears: `SIGNAL LOST` + the instance + `cycled all
+> instances · attempt 8 · retrying in 23s` (live countdown). The header badge
+> `FAILED 8`, the HUD `failed(8)`, and Pulse's red gap band are all tied together in
+> the same danger tone. For a demo it's usually better to disconnect for 30 seconds and
+> show recovery — `failed` makes you wait 95 seconds.
 
-### 4. 복구 — "빈 구간을 되감아 메운다"
+### 4. Recovery — "rewind and backfill the empty gap"
 
-30초가 지나면 자동으로 재연결된다. 개입 없이 그대로 둔다.
+After 30 seconds it reconnects automatically. Leave it alone, no intervention.
 
-| 볼 것 | 기대 |
+| What to watch | Expected |
 |---|---|
-| 배지 | `replaying` → `live` |
-| HUD `recv/s` | 치솟음 — 되감기 재생은 실시간의 약 10배 속도 |
-| Pulse 갭 띠 | **붉은색 → 푸른색**(accent) — 리플레이가 그 구간의 버킷을 실제로 메웠다는 뜻 |
-| HUD `ws` | `replaying N.Ns` → 0으로 수렴 → `live` |
-| `replaySkipped` | 증가 — 커서를 5초 되감아 열기 때문에 겹치는 분량을 중복 방지로 버린다 |
+| Badge | `replaying` → `live` |
+| HUD `recv/s` | spikes — cursor rewind replays at about 10× real time |
+| Pulse gap band | **red → blue** (accent) — meaning the replay actually filled that span's buckets |
+| HUD `ws` | `replaying N.Ns` → converges to 0 → `live` |
+| `replaySkipped` | rises — because the cursor reopens 5 seconds back, the overlapping portion is discarded as duplicates |
 
-말할 것: 리플레이 이벤트는 **자기 `time_us`의 초 버킷**에 넣는다. 벽시계 기준으로
-넣으면 30초치 과거 이벤트가 현재 초에 몰려 가짜 스파이크가 되고 갭은 영영 비어 있게
-된다. 갭이 원래 자리에서 메워지는 것이 그 증거다.
+What to say: replayed events go into **the second-bucket of their own `time_us`**. If
+they went in by wall-clock time, 30 seconds' worth of past events would pile into the
+current second as a fake spike and the gap would stay empty forever. The gap filling
+back in at its original position is the proof.
 
-### 5. degraded — "마지막 단을 밟는다"
+### 5. degraded — "step on the last stage"
 
-실제 파이어호스 유입(~350-450 evt/s)으로는 파싱 예산에 한참 못 미쳐 degraded가 자연
-발생하지 않는다. 그래서 처리 지연을 주입해 "유입 > 처리 능력"을 만든다.
+With real firehose inflow (~350-450 evt/s), you fall well short of the parsing budget,
+so degraded never occurs naturally. So we inject processing delay to create
+"inflow > processing capacity."
 
 ```js
-__jetstreamDebug.stall(20000, 12000)   // 프레임당 20ms CPU를 12초간 태운다
+__jetstreamDebug.stall(20000, 12000)   // burn 20ms of CPU per frame for 12 seconds
 ```
 
-| 볼 것 | 기대 |
+| What to watch | Expected |
 |---|---|
-| HUD 배너 | `DEGRADED / parsing 1 in M · load N%` |
-| HUD `drop/s` | 급등 — 파싱조차 하지 않고 버린 분량(`degradedSkipped`)이 합산된다 |
-| Pulse | 처리량이 실제보다 낮게 그려짐 — **보정하지 않는다**(정직성 규칙) |
-| 주입 종료 후 | 자동 복귀, 배너 사라짐 |
+| HUD banner | `DEGRADED / parsing 1 in M · load N%` |
+| HUD `drop/s` | surges — the portion dropped without even parsing (`degradedSkipped`) is added in |
+| Pulse | throughput drawn lower than reality — **not corrected** (honesty rule) |
+| After injection ends | auto-recovery, the banner disappears |
 
-말할 것: 이 단계만이 유일하게 **실제 데이터를 잃는다**. 그래서 숫자 한 칸이 아니라
-문장으로 알린다 — "화면에 보이는 것이 전부가 아니다"라는 뜻이라, 놓치면 나머지
-숫자를 통째로 잘못 읽게 된다.
+What to say: this is the only stage that **actually loses data**. That's why it's
+announced with a sentence, not just a number — it means "what you see on screen isn't
+everything," and missing it makes you misread every other number wholesale.
 
-### 6. (선택) Pause — "정지는 렌더 정지지 수집 정지가 아니다"
+### 6. (optional) Pause — "pause halts rendering, not collection"
 
-헤더 `Pause` 클릭.
+Click `Pause` in the header.
 
-| 볼 것 | 기대 |
+| What to watch | Expected |
 |---|---|
-| 패널 전체 | 동결 (Mix `data-total`, Tape 행 수 고정) |
-| HUD | **계속 갱신** — `PAUSED · RENDER FROZEN / buffering Ts · N ev` |
-| 재개 | 밀린 프레임 따라잡기가 아니라 최신 한 장으로 점프 |
+| All panels | frozen (Mix `data-total` and Tape row count held) |
+| HUD | **keeps updating** — `PAUSED · RENDER FROZEN / buffering Ts · N ev` |
+| Resume | jumps to the single latest frame rather than catching up on the backlog |
 
-### 7. (선택) 측정 모드 — "이 데모의 숫자를 그대로 뽑는다"
+### 7. (optional) Measurement mode — "export the exact numbers from this demo"
 
-**"m" 키** → HUD에 `● REC` 표시. 60초마다 창이 하나씩 닫힌다.
+**The "m" key** → `● REC` appears in the HUD. A window closes every 60 seconds.
 
 ```js
-__jetstreamMeasureCtl.json()   // 60초 창 통계 JSON
+__jetstreamMeasureCtl.json()   // 60-second window statistics as JSON
 ```
 
-### 종단간 검증 기록
+### End-to-end verification record
 
-위 시나리오를 headless 브라우저로 처음부터 끝까지 한 번에 태워 각 단계에서 화면이
-말해야 할 것을 실제로 확인했다 — **32개 확인 항목 전부 통과, 페이지 에러 0**
-(2026-07-18). 결과: `docs/measurements/p9-demo-verify.json`
+We ran the scenario above end to end in one pass in a headless browser and actually
+verified what the screen should say at each step — **all 32 checks passed, 0 page
+errors** (2026-07-18). Results: `docs/measurements/p9-demo-verify.json`
 
-| 단계 | 확인된 것 (실측 예시) |
+| Step | What was verified (measured examples) |
 |---|---|
-| 0 | 로드 시 빈 상태 오버레이 `connecting` → 연결되면 사라짐 |
-| 1 | 배지 `live` · 게이지 4셀(`scaleY(0.2364)`) · Tape 187행 · Mix n=505 · recv/s 338 |
-| 2 | `conn.filter`→`full` · `cols 10s` 6→21 · 갭 0 유지 · `replaySkipped` 0→2,236 |
-| 3 | `reconnecting`(attempt 3) · `retryInMs` 1,588 · 열린 갭 마커 1 · recv/s 0 |
-| 4 | `reconnects` 1 · 갭 1/1 닫힘 · **`replayed: true`** · `lagSec` 0.10 → `live` |
-| 5 | degraded 진입 M=4 load=372% · 배너 `parsing 1 in 4 · load 372%` · drop/s 48→194 · 자동 복귀 M=1 |
-| 6 | "m" 키 → `● REC 1w` → 다시 "m" 키로 off |
+| 0 | empty-state overlay `connecting` on load → disappears once connected |
+| 1 | badge `live` · gauge 4 cells (`scaleY(0.2364)`) · Tape 187 rows · Mix n=505 · recv/s 338 |
+| 2 | `conn.filter`→`full` · `cols 10s` 6→21 · gaps held at 0 · `replaySkipped` 0→2,236 |
+| 3 | `reconnecting` (attempt 3) · `retryInMs` 1,588 · 1 open gap marker · recv/s 0 |
+| 4 | `reconnects` 1 · gaps 1/1 closed · **`replayed: true`** · `lagSec` 0.10 → `live` |
+| 5 | degraded entry M=4 load=372% · banner `parsing 1 in 4 · load 372%` · drop/s 48→194 · auto-recovery M=1 |
+| 6 | "m" key → `● REC 1w` → "m" again to turn off |
 
-> 검증 중 발견한 것: HUD 텍스트는 100ms 주기로 칠해지므로(`TEXT_INTERVAL_MS`) 스냅샷이
-> `degraded`로 바뀐 **직후** DOM을 읽으면 아직 이전 상태다. 사람 눈에는 보이지 않는
-> 지연이지만 자동 검증에서는 반드시 페인트를 기다려야 한다 — 실측으로 3초 안에 항상
-> 반영됐다.
+> Found during verification: because the HUD text is painted on a 100ms cycle
+> (`TEXT_INTERVAL_MS`), reading the DOM **right after** the snapshot flips to `degraded`
+> still shows the previous state. It's a delay invisible to the human eye, but automated
+> verification must wait for the paint — in measurements it was always reflected within
+> 3 seconds.
 
 ---
 
-## 5. R3 튜닝 — 확정값과 그 근거
+## 5. R3 tuning — Final values and rationale
 
-### 확정값
+### Final values
 
-`lib/jetstream/protocol.ts`의 `SURGE_TUNING_DEFAULTS`. 런타임에 개발용 튜닝 패널
-("t" 키)로 조절할 수 있지만 **세션 한정**이고 어디에도 저장하지 않는다.
+`SURGE_TUNING_DEFAULTS` in `lib/jetstream/protocol.ts`. You can adjust them at runtime
+via the dev tuning panel (the "t" key), but that is **session-only** and never
+persisted anywhere.
 
-| 파라미터 | 확정값 | 역할 |
+| Parameter | Final value | Role |
 |---|---|---|
-| `alpha` (α) | **2** | 라플라스 스무딩(분당 언급 상당). `burst = (rate5m + α) / (baseline + α)` |
-| `minSupport` | **30** | 급상승 진입에 필요한 최소 5분 언급 수 |
-| `deadbandPct` | **15%** | 인접 순위 스코어 차가 이 미만이면 자리를 바꾸지 않는다 |
-| `minDwellSec` | **30s** | 리스트 진입 후 최소 체류 |
-| `enterMult` | **×2.0** | 진입 문턱(배수) |
-| `exitMult` | **×1.4** | 퇴출 문턱 — 진입보다 낮아 히스테리시스를 만든다 |
-| `resortSec` | **5s** | 재정렬 주기(스코어 갱신은 스냅샷마다 계속된다) |
+| `alpha` (α) | **2** | Laplace smoothing (roughly a mention per minute). `burst = (rate5m + α) / (baseline + α)` |
+| `minSupport` | **30** | minimum 5-minute mention count required to enter surging |
+| `deadbandPct` | **15%** | if the score gap between adjacent ranks is below this, no swap happens |
+| `minDwellSec` | **30s** | minimum dwell time after entering the list |
+| `enterMult` | **×2.0** | entry threshold (multiplier) |
+| `exitMult` | **×1.4** | exit threshold — lower than entry, creating hysteresis |
+| `resortSec` | **5s** | re-sort period (score updates continue on every snapshot) |
 
-이 값들은 측정 모드 JSON의 `tuning` 필드에 **워커가 실제 적용 중인 값**으로 기록된다
-(추정이 아니라 스냅샷 `surge.tuning`의 에코). 세션 중 값이 바뀌면 `tuningChanged: true`가
-같이 실린다 — 위 §3의 모든 측정에서 `tuningChanged: false`였다.
+These values are recorded in the `tuning` field of the measurement-mode JSON as **the
+values the worker is actually applying** (not an estimate, but an echo of the
+snapshot's `surge.tuning`). If a value changes during a session, `tuningChanged: true`
+rides along — in every measurement in §3 above, `tuningChanged: false`.
 
-### 왜 이 값인가 — 실스트림 대조 실험
+### Why these values — live-stream A/B (contrast) experiment
 
-> **기록에 관한 정직한 고지.** 저장소에는 R3 튜닝 **이전의 초기값**이 남아 있지 않다.
-> `SURGE_TUNING_DEFAULTS`는 R3에서 통째로 새로 추가됐고(그 이전 P5는 z-score 기반의
-> 다른 알고리즘이라 같은 축의 값이 아니다), 튜닝 과정의 중간값도 커밋되지 않았다.
-> 그래서 기억에 의존한 "초기값 → 확정값" 서사를 쓰는 대신, **확정값의 반대 사실을
-> 지금 실측했다** — 안정화 장치를 끈 상태와 확정값을 같은 실스트림 위에서 각각 3분씩.
+> **An honest note about the record.** The repository holds no **pre-R3 initial
+> values**. `SURGE_TUNING_DEFAULTS` was added wholesale in R3 (the earlier P5 used a
+> different, z-score-based algorithm, so its values aren't on the same axis), and the
+> intermediate values from the tuning process weren't committed either. So instead of
+> writing a memory-based "initial → final" narrative, **we measured the counterfactual
+> to the final values right now** — the stabilizers turned off versus the final values,
+> three minutes each on the same live stream.
 
-- 원자료: `docs/measurements/p9-tuning-contrast.json`
-- 표본: 급상승 top-10을 **1초 간격 180표본**, 각 구간 2.99분
-- A = 안정화 off (`deadbandPct 0` · `minDwellSec 0` · `resortSec 1`)
-- B = 확정값 (`deadbandPct 15` · `minDwellSec 30` · `resortSec 5`)
+- Raw data: `docs/measurements/p9-tuning-contrast.json`
+- Samples: surging top-10 at **180 samples, one per second**, 2.99 minutes per segment
+- A = stabilizers off (`deadbandPct 0` · `minDwellSec 0` · `resortSec 1`)
+- B = final values (`deadbandPct 15` · `minDwellSec 30` · `resortSec 5`)
 
-| 지표 (급상승 top-10) | A: 안정화 off | B: 확정값 | 변화 |
+| Metric (surging top-10) | A: stabilizers off | B: final values | Change |
 |---|---|---|---|
-| **분당 순위 변동 횟수** | **93.6** | **9.7** | **약 1/10** |
-| 화면이 실제로 바뀐 표본 | 119 / 179 (66%) | 19 / 179 (11%) | 1/6 |
-| 관측된 재정렬 이벤트 | 178 | 37 | 설계대로 1s vs 5s |
-| 분당 리스트 이탈·진입 | 29.4 | 17.4 | 0.59배 |
+| **Rank changes per minute** | **93.6** | **9.7** | **about 1/10** |
+| Samples where the screen actually changed | 119 / 179 (66%) | 19 / 179 (11%) | 1/6 |
+| Observed re-sort events | 178 | 37 | 1s vs 5s, as designed |
+| List exits/entries per minute | 29.4 | 17.4 | 0.59× |
 
-지속(해시태그) 리스트도 같은 방향이다 — 분당 순위 변동 **12 → 2.7**, 분당 교체
-**2.7 → 0**.
+The sustained (hashtag) list points the same way — rank changes per minute
+**12 → 2.7**, turnover per minute **2.7 → 0**.
 
-**읽는 법.** A에서는 매 초 재정렬이 돌고 표본의 3분의 2에서 화면 순서가 바뀐다. 분당
-93.6회면 **1초에 1.5번꼴로 어딘가의 행이 자리를 옮긴다** — R4의 FLIP 400ms 전환이 끝나기
-전에 다음 이동이 시작된다는 뜻이고, 리스트는 읽는 물건이 아니라 흔들리는 물건이 된다.
-확정값은 그 변동을 약 1/10로 줄이면서도 재정렬 자체는 계속 돈다(3분에 37회). 즉 **정보를
-버려 안정을 산 게 아니라, 의미 없는 자리바꿈만 걸러낸다** — 스코어는 스냅샷마다 갱신되고
-순위만 5초 주기로 반영되기 때문이다.
+**How to read this.** In A, a re-sort runs every second and the on-screen order changes
+in two-thirds of the samples. At 93.6 per minute, **some row moves roughly 1.5 times
+every second** — meaning the next move starts before R4's 400ms FLIP transition
+finishes, and the list becomes something that shakes rather than something you read.
+The final values cut that churn to about 1/10 while the re-sort itself keeps running
+(37 times in 3 minutes). In other words, **we didn't buy stability by throwing away
+information — we only filter out meaningless swaps** — because the scores update on
+every snapshot and only the ranking is applied on a 5-second cycle.
 
-세 장치의 역할 분담이 숫자에 그대로 보인다:
-- `resortSec 5` — 재정렬 이벤트 178 → 37 (주기 자체를 늦춘다)
-- `deadbandPct 15` — 재정렬이 돌아도 자리를 안 바꾼다: 37회 재정렬 중 화면이 바뀐 표본은 19
-- `minDwellSec 30` — 진입·이탈을 29.4 → 17.4/분으로 눌러 리스트 구성원 자체를 붙잡는다
+The division of labor across the three mechanisms is visible right in the numbers:
+- `resortSec 5` — re-sort events 178 → 37 (slows the cycle itself)
+- `deadbandPct 15` — even when a re-sort runs, positions don't change: of 37 re-sorts, the screen changed in only 19 samples
+- `minDwellSec 30` — presses entries/exits from 29.4 to 17.4 per minute, holding the list membership itself in place
 
-> **이 실험의 한계.** A와 B는 같은 실스트림 위의 **서로 다른 3분 구간**이라 배경 트렌드의
-> 변동성이 완전히 같지는 않다. 완전 통제된 A/B가 아니다. 다만 효과 크기(약 10배)가 배경
-> 요동으로 설명될 수 있는 범위를 크게 벗어나고, 세 장치가 각각 겨냥한 지표(재정렬 횟수·
-> 자리바꿈·교체율)에서 방향이 모두 일치한다.
+> **Limitations of this experiment.** A and B are **different 3-minute segments** on
+> the same live stream, so the variability of the background trend isn't perfectly
+> identical. This is not a fully controlled A/B. That said, the effect size (about 10×)
+> is far outside what background jitter could explain, and the direction is consistent
+> across all three metrics each mechanism targets (re-sort count, swaps, turnover rate).

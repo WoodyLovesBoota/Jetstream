@@ -1,4 +1,4 @@
-/* 우측 컬럼 하단에 고정 배치되는 계기판 — 플로팅이 아니므로 다른 패널을 가리지 않는다 */
+/* Instrument panel pinned to the bottom of the right column — it does not float, so it never covers another panel */
 .hud {
   flex: none;
   min-width: 0;
@@ -27,7 +27,7 @@
   color: var(--muted);
 }
 
-/* 측정 모드 표시 — 켜져 있을 때만 보인다. 점이 느리게 깜박여 "기록 중"임을 알린다 */
+/* Measurement-mode indicator — visible only while active. The dot blinks slowly to signal "recording" */
 .rec {
   font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 10px;
@@ -56,7 +56,7 @@
   color: var(--faint);
 }
 
-/* 배너는 둘 다 숨겨져 있는 것이 정상 상태라 평소에는 HUD 높이에 영향을 주지 않는다 */
+/* Both banners hidden is the normal state, so they do not affect the HUD height most of the time */
 .notices:has(> .notice:not([hidden])) {
   margin-bottom: 7px;
   display: flex;

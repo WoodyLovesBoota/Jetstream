@@ -39,7 +39,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  /* 인접 막대를 갈라놓는 것은 테두리가 아니라 표면 간격 2px */
+  /* What separates adjacent bars is not a border but a 2px surface gap */
   gap: 2px;
   margin: 0;
   padding: 0;
@@ -48,8 +48,8 @@
 }
 
 /*
- * 9행이 패널 높이를 나눠 갖되 20px을 넘지 않는다 — 패널이 짧아지면 행이 줄어들 뿐
- * 마지막 행이 잘려나가지 않는다.
+ * The 9 rows split the panel height between them but never exceed 20px — when the panel
+ * gets shorter the rows just shrink; the last row is never cut off.
  */
 .row {
   flex: 1 1 0;
@@ -60,24 +60,24 @@
   gap: 8px;
   font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 11px;
-  /* 행 높이가 밭을 때 줄상자가 행을 밀어내지 않도록 */
+  /* Keeps the line box from pushing the row out when row height is tight */
   line-height: 1;
   white-space: nowrap;
 }
 
-/* 아직 채워지지 않은 순위 — 레이아웃은 유지하고 내용만 감춘다 */
+/* Ranks not yet filled — the layout is kept and only the content is hidden */
 .row[data-filled="false"] {
   visibility: hidden;
 }
 
-/* 언어 코드는 2-3자지만 "other"까지 잘리지 않고 들어가야 한다 */
+/* Language codes are 2-3 characters, but "other" must also fit without being clipped */
 .label {
   flex: none;
   width: 5ch;
   color: var(--text);
 }
 
-/* other는 잔여 합산값이라 정체성 색을 새로 소비하지 않고 톤을 낮춘다 (Pulse와 같은 규칙) */
+/* other is a remainder total, so it tones down rather than consuming a new identity color (same rule as Pulse) */
 .row[data-lang="other"] .label {
   color: var(--muted);
 }
@@ -96,10 +96,10 @@
   bottom: 0;
   left: 0;
   min-width: 2px;
-  /* 데이터 끝만 둥글게, 기준선 쪽은 각지게 */
+  /* Rounded only at the data end, square at the baseline end */
   border-radius: 0 2px 2px 0;
   background: #3987e5;
-  /* 스냅샷은 10Hz — 그 사이를 메워 계단이 아니라 흐름으로 읽히게 한다 */
+  /* Snapshots are 10Hz — this fills the gaps so it reads as flow rather than steps */
   transition: width 110ms linear;
 }
 

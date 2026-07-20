@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { SURGE_TUNING_DEFAULTS } from "@/lib/jetstream/protocol";
 import { createMeasurementRecorder, type MeasureSecond } from "./measurement";
 
-// 레코더는 nowMs를 전부 파라미터로 받는 순수 집계기라 시계 모킹 없이 검증한다.
+// The recorder is a pure aggregator that takes every nowMs as a parameter, so it is verified without mocking the clock.
 
 function sec(over: Partial<MeasureSecond> = {}): MeasureSecond {
   return {
@@ -25,15 +25,15 @@ function sec(over: Partial<MeasureSecond> = {}): MeasureSecond {
 }
 
 describe("createMeasurementRecorder", () => {
-  it("60초 경계에서 창이 굴러가고 통계가 표본과 일치한다", () => {
+  it("rolls the window at the 60-second boundary and the statistics match the samples", () => {
     const rec = createMeasurementRecorder();
     rec.start("test", {}, 0);
 
-    // 1..59초는 창 0, 60초 표본부터는 창 1(진행 중)
+    // Seconds 1..59 go in window 0; from the 60-second sample on, window 1 (in progress)
     for (let t = 1; t <= 90; t++) rec.noteSecond(t * 1000, sec({ recvPerSec: t }));
 
     const out = rec.export();
-    expect(out.windows.length).toBe(2); // 닫힌 창 + 진행 중 창
+    expect(out.windows.length).toBe(2); // closed window + in-progress window
     const w0 = out.windows[0];
     expect(w0.seconds).toBe(59);
     expect(w0.recvPerSec.min).toBe(1);
@@ -44,7 +44,7 @@ describe("createMeasurementRecorder", () => {
     expect(out.windows[1].seconds).toBe(31);
   });
 
-  it("degraded 초·최대 M이 창 단위로 집계된다", () => {
+  it("aggregates degraded seconds and max M per window", () => {
     const rec = createMeasurementRecorder();
     rec.start("degraded", {}, 0);
     for (let t = 1; t <= 20; t++) {
@@ -58,14 +58,14 @@ describe("createMeasurementRecorder", () => {
     expect(w.degraded.maxM).toBe(8);
   });
 
-  it("프레임 간격은 스케줄러 공백(2초 이상)만 제외하고 담는다", () => {
+  it("keeps frame intervals, excluding only scheduler gaps (2 seconds or more)", () => {
     const rec = createMeasurementRecorder();
     rec.start("frames", {}, 0);
-    rec.noteSecond(1000, sec()); // 창이 껍데기로 버려지지 않게 초 표본 하나
-    rec.noteFrame(1100, 16.7); // 정상 프레임
-    rec.noteFrame(1200, 480); // 저사양에서 실제로 늘어진 프레임 — 담아야 p95가 정직하다
-    rec.noteFrame(1300, 2_500); // rAF 디스케줄 공백 — 제외
-    rec.noteFrame(1400, 0); // 첫 프레임(간격 없음) — 제외
+    rec.noteSecond(1000, sec()); // one per-second sample so the window isn't discarded as a shell
+    rec.noteFrame(1100, 16.7); // normal frame
+    rec.noteFrame(1200, 480); // a frame that genuinely stretched out on low-end hardware — must be kept for p95 to stay honest
+    rec.noteFrame(1300, 2_500); // rAF descheduling gap — excluded
+    rec.noteFrame(1400, 0); // first frame (no interval) — excluded
     rec.stop(2000);
 
     const w = rec.export().windows[0];
@@ -73,7 +73,7 @@ describe("createMeasurementRecorder", () => {
     expect(w.frameMs.max).toBe(480);
   });
 
-  it("초 표본이 없는 껍데기 창은 버려진다", () => {
+  it("discards shell windows that have no per-second samples", () => {
     const rec = createMeasurementRecorder();
     rec.start("shell", {}, 0);
     rec.noteFrame(100, 16);
@@ -81,7 +81,7 @@ describe("createMeasurementRecorder", () => {
     expect(rec.export().windows.length).toBe(0);
   });
 
-  it("창 사이에 필터·튜닝이 바뀌면 mixed/tuningChanged로 표시된다", () => {
+  it("reports mixed/tuningChanged when the filter or tuning changes between windows", () => {
     const rec = createMeasurementRecorder();
     rec.start("mixed", {}, 0);
     rec.noteSecond(1000, sec({ filter: "filtered" }));
@@ -92,6 +92,6 @@ describe("createMeasurementRecorder", () => {
     const out = rec.export();
     expect(out.filter).toBe("mixed");
     expect(out.tuningChanged).toBe(true);
-    expect(out.tuning?.alpha).toBe(9); // 마지막 관측값이 확정값이다
+    expect(out.tuning?.alpha).toBe(9); // the last observed value is the final one
   });
 });

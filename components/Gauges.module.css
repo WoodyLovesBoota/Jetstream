@@ -5,7 +5,7 @@
   gap: var(--gap);
 }
 
-/* 셀별 타입 색은 인라인 --type-color로 들어온다 (lib/palette.ts가 유일한 원천) */
+/* Per-cell type colors arrive inline via --type-color (lib/palette.ts is the single source) */
 .cell {
   position: relative;
   display: flex;
@@ -18,7 +18,7 @@
   overflow: hidden;
 }
 
-/* 배경 채움 게이지 — transform: scaleY만 갱신하므로 리플로우가 없다 */
+/* Background fill gauge — only transform: scaleY is updated, so there is no reflow */
 .fill {
   position: absolute;
   inset: 0;

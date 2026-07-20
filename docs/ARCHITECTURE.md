@@ -1,25 +1,30 @@
-# Jetstream Deck — 설계 문서
+# Jetstream Deck — Design Document
 
-브라우저 단독으로 Bluesky Jetstream(공개 WebSocket 파이어호스, 무인증)을 구독해,
-Web Worker에서 수신·파싱·집계하고 메인 스레드는 10Hz 스냅샷을 rAF로 그리는
-단일 화면 실시간 대시보드.
+A single-screen, real-time dashboard that subscribes to the Bluesky Jetstream
+(a public, no-auth WebSocket firehose) entirely from the browser: a Web Worker
+handles ingestion, parsing, and aggregation, while the main thread paints 10Hz
+snapshots via rAF.
 
-## 1. 불변 원칙
+## 1. Invariants (core principles)
 
-1. **워커가 전부 처리한다.** WebSocket 수신, JSON 파싱, 집계는 모두 Web Worker 안.
-   원시 이벤트는 집계에 반영한 즉시 폐기하고 어디에도 쌓아두지 않는다.
-2. **10Hz 고정 스냅샷.** 워커는 100ms 주기로 집계 상태의 스냅샷(plain object,
-   structured clone 가능한 값만)을 `postMessage`로 메인 스레드에 보낸다.
-   이벤트가 아무리 몰려도 메인 스레드로 건너가는 메시지는 초당 10개로 고정.
-3. **메인 스레드는 그리기만 한다.** 최신 스냅샷은 ref에 보관하고 rAF 틱마다
-   canvas/DOM에 그린다. React 리렌더는 셸·컨트롤(헤더, 버튼, 연결 배지 등
-   저빈도 UI)에만 허용하고 데이터 경로에서는 배제한다.
-4. **버리는 곳마다 카운터.** 폐기·드롭이 일어나는 모든 지점에 카운터를 달고
-   HUD에 노출한다. 조용한 손실은 없다.
-- SharedArrayBuffer는 사용하지 않는다 (COOP/COEP 요구사항 회피, postMessage로 충분).
-- 검증되지 않은 숫자는 UI에도 주석에도 쓰지 않는다. 측정한 값만 표시한다.
+1. **The Worker does everything.** WebSocket ingestion, JSON parsing, and
+   aggregation all live inside the Web Worker. Raw events are discarded the
+   instant they're folded into the aggregates and are never buffered anywhere.
+2. **Fixed 10Hz snapshots.** Every 100ms the Worker posts a snapshot of the
+   aggregation state (a plain object, containing only structured-clone-able
+   values) to the main thread via `postMessage`. No matter how hard events pile
+   up, the number of messages crossing to the main thread stays fixed at 10 per
+   second.
+3. **The main thread only paints.** The latest snapshot is held in a ref and
+   drawn to canvas/DOM on every rAF tick. React re-renders are allowed only for
+   the shell and controls (low-frequency UI such as the header, buttons, and
+   connection badge) and are kept out of the data path.
+4. **A counter wherever we drop.** Every point where something is discarded or
+   dropped gets a counter, surfaced in the HUD. There is no silent loss.
+- No SharedArrayBuffer (avoids the COOP/COEP requirements; `postMessage` is enough).
+- No unverified number goes into the UI or even the comments. We show only measured values.
 
-## 2. 데이터 경로
+## 2. Data path
 
 ```
  Jetstream WS ──▶ ┌────────────── Web Worker ──────────────┐      ┌──── Main ────┐
@@ -31,344 +36,453 @@ Web Worker에서 수신·파싱·집계하고 메인 스레드는 10Hz 스냅샷
                                                                   └──────────────┘
 ```
 
-- WebSocket은 푸시 기반이라 명시적 백프레셔가 없다. 워커가 소비를 따라가지
-  못하면 이벤트 루프 지연으로 나타나므로, 이벤트당 집계 작업은 O(1)로 유지한다.
-- 스냅샷 생성도 O(스냅샷 크기)로 고정 — 집계 구조가 전부 고정 크기이기 때문.
+- WebSocket is push-based, so there is no explicit backpressure. If the Worker
+  can't keep up with consumption, it shows up as event-loop lag — so per-event
+  aggregation work is kept O(1).
+- Snapshot construction is likewise fixed at O(snapshot size), because every aggregation structure is fixed-size.
 
-## 3. 워커 내부 설계 (P1+)
+## 3. Worker internals (P1+)
 
-### 연결 관리 (`lib/jetstream/connection.ts`, P7)
+### Connection management (`lib/jetstream/connection.ts`, P7)
 
-소켓 수명·복구는 집계와 분리해 별도 모듈이 전담한다. 워커는 프레임을 집계에
-반영한 뒤 그 이벤트의 `time_us`만 `noteEvent()`로 돌려주고, 연결 계층은 그 값
-하나에서 재개 커서·리플레이 판정·갭 종료를 전부 끌어낸다.
+Socket lifecycle and recovery are split out from aggregation into a dedicated
+module. Once the Worker folds a frame into the aggregates, it hands only that
+event's `time_us` back via `noteEvent()`, and the connection layer derives
+everything — the resume cursor, replay detection, and gap closure — from that
+single value.
 
-- **재연결:** 지수 백오프(1s에서 시작, 시도마다 2배, 상한 30s) + ±20% 지터.
-  대기 중 상태는 `reconnecting`이고 `attempt`(연속 시도 횟수)를 함께 노출한다.
-- **커서 재개:** 마지막 처리 이벤트의 `time_us − 5초`를 `cursor` 파라미터로 실어
-  다시 연다. 겹치는 5초는 워커가 `time_us ≤ 마지막 처리값` 조건으로 버리므로
-  (`replaySkipped` 카운터) 중복 집계가 없다. **되감기 하한은 링 보관 구간(300초)** —
-  그보다 오래된 구간은 도착해도 넣을 버킷이 없고, 표시하지도 못할 분량을
-  10배속으로 재생하며 CPU만 태운다. 최초 연결은 커서 없이 라이브 테일.
-- **인스턴스 페일오버:** 같은 인스턴스에서 2회 연속 실패하면 다음 공식 인스턴스로
-  넘어간다(us-east 2대 → us-west 2대 순환). `cursor`가 시간 기반이라 인스턴스가
-  바뀌어도 재개 지점이 그대로 통한다 — 4대 모두 실측 확인(2026-07-18).
-  인스턴스를 한 바퀴 다 돌고도(8회) 못 붙으면 `failed`로 표시하되, 재시도는 상한
-  간격으로 계속한다. "포기"가 아니라 "복구 못 하고 있다"는 정직한 표시다.
-- **리플레이 판정:** 수신 이벤트의 `time_us`가 벽시계보다 2초 넘게 뒤처져 있으면
-  `replaying`, 따라잡히면 `live`. 임계값 2초는 라이브 테일의 실측 지연(p95 0.06초,
-  us-east/us-west 2026-07-18 측정) 위에서 넉넉하게 잡은 값이다.
-- **이벤트 시각 버킷팅:** 리플레이 이벤트는 **자기 `time_us`의 초 버킷**에 넣는다.
-  벽시계 기준으로 넣으면 30초치 과거 이벤트가 현재 초에 몰려 가짜 스파이크가 되고,
-  갭은 영영 비어 있게 된다. 링 밖(300초 초과) 이벤트는 `replayStale`로 세고 버린다.
-  단, Surge만은 벽시계 초로 넣는다 — "지금 무엇이 뜨는가"가 질문이라 갭 동안 쌓인
-  토큰이 복구 시점에 반영되는 편이 맞다.
-- **갭 마커:** 단절 순간부터 다시 이어질 때까지를 한 덩어리(`GapMarker`)로 기록해
-  스냅샷에 싣는다. 되감기가 그 구간의 버킷을 채우면 `replayed`가 켜지고, Pulse가
-  "비어 있는 갭(danger)"과 "메워진 구간(accent)"을 다른 색 띠로 구분해 그린다.
-- **테스트 훅:** DevTools 오프라인 토글은 **이미 열린 WebSocket을 끊지 못한다**
-  (수신만 멈춘다). 그래서 복구 경로를 재현 가능하게 찌를 디버그 명령을 워커에 둔다:
-  `{ type: "debug", action: "drop", blockMs }` — 소켓을 끊고 `blockMs` 동안은
-  재연결 시도까지 실패시켜 백오프·페일오버·`failed`·되감기를 실제와 같은 경로로 태운다.
-  dev 빌드에서는 `__jetstreamDebug.drop(ms)`로 콘솔에서 바로 호출할 수 있다.
+- **Reconnect:** exponential backoff (starting at 1s, doubling each attempt,
+  capped at 30s) plus ±20% jitter. While waiting, the state is `reconnecting`,
+  and `attempt` (the number of consecutive attempts) is surfaced alongside it.
+- **Cursor resume:** reopen with the last processed event's `time_us − 5s` as
+  the `cursor` parameter. The overlapping 5 seconds are discarded by the Worker
+  under the condition `time_us ≤ last processed value` (the `replaySkipped`
+  counter), so there's no double-counting. **The rewind floor is the ring's
+  retention window (300s)** — anything older than that has no bucket to land in
+  even if it arrives, and replaying a volume we can't even display, at 10× speed,
+  just burns CPU. The initial connection is a live tail with no cursor.
+- **Instance failover:** after two consecutive failures on the same instance, we
+  move to the next official instance (cycling us-east ×2 → us-west ×2). Because
+  `cursor` is time-based, the resume point still works even when the instance
+  changes — verified empirically on all four (2026-07-18). If a full lap around
+  the instances (8 attempts) still can't connect, we show `failed` but keep
+  retrying at the capped interval. That's an honest "still failing to recover,"
+  not "giving up."
+- **Replay detection:** if an incoming event's `time_us` trails the wall clock
+  by more than 2 seconds, the state is `replaying`; once it catches up, `live`.
+  The 2-second threshold sits comfortably above the measured live-tail latency
+  (p95 0.06s, measured us-east/us-west on 2026-07-18).
+- **Event-time bucketing:** replayed events go into **the second-bucket of their
+  own `time_us`**. Bucketing them by wall clock would cram 30 seconds' worth of
+  past events into the current second — a fake spike — and leave the gap empty
+  forever. Events outside the ring (older than 300s) are counted as
+  `replayStale` and dropped. Surge is the one exception: it buckets by
+  wall-clock second, because its question is "what's trending right now," so it's
+  correct for tokens accumulated during a gap to land at the moment of recovery.
+- **Gap markers:** the span from the moment of disconnection until the stream
+  resumes is recorded as a single unit (`GapMarker`) and carried in the
+  snapshot. When the rewind fills that span's buckets, `replayed` flips on, and
+  Pulse draws the "empty gap (danger)" and the "backfilled span (accent)" as
+  differently colored bands.
+- **Test hook:** the DevTools offline toggle **can't close an already-open
+  WebSocket** (it only stops delivery). So the Worker carries a debug command
+  for poking the recovery path reproducibly:
+  `{ type: "debug", action: "drop", blockMs }` — it closes the socket and fails
+  even reconnection attempts for `blockMs`, driving backoff, failover, `failed`,
+  and rewind down the same path as the real thing. In dev builds you can call it
+  straight from the console with `__jetstreamDebug.drop(ms)`.
 
-### 백프레셔 3단계 (`lib/jetstream/backpressure.ts`, P8)
+### Backpressure, three tiers (`lib/jetstream/backpressure.ts`, P8)
 
-WebSocket은 푸시 기반이라 명시적 백프레셔가 없다. 소비가 못 따라가면 이벤트 루프
-지연으로 나타날 뿐이므로, 줄일 수 있는 지점마다 단을 하나씩 세워 뒀다.
+WebSocket is push-based, so there's no explicit backpressure. When consumption
+falls behind, it only shows up as event-loop lag — so we've built one tier at
+each point where load can be shed.
 
-| 단계 | 줄이는 것 | 장치 | 관측 |
+| Tier | What it sheds | Mechanism | Observability |
 |---|---|---|---|
-| 1 | 메인 스레드로 가는 메시지 | 10Hz 고정 스냅샷 | `snap` |
-| 2 | 화면에 append하는 행 | Tape 1/N stride | `showing 1 in N` |
-| 3 | **파싱 자체** | degraded 1/M 샘플링 | `degraded` 배너 + `drop/s` |
+| 1 | Messages to the main thread | Fixed 10Hz snapshots | `snap` |
+| 2 | Rows appended to the screen | Tape 1/N stride | `showing 1 in N` |
+| 3 | **Parsing itself** | degraded 1/M sampling | `degraded` banner + `drop/s` |
 
-1·2단계는 "표시량"만 줄이므로 워커의 파싱 부하는 그대로다. 유입 자체가 처리 능력을
-넘어서면 남는 수단은 파싱을 건너뛰는 것뿐이고, 그게 3단계다.
+Tiers 1 and 2 only reduce how much is *displayed*, so the Worker's parsing load
+is unchanged. Once the inflow itself exceeds processing capacity, the only
+remaining lever is to skip parsing — and that's tier 3.
 
-- **판정 = 큐 깊이 대신 이용률.** WebSocket에는 수신 큐 깊이를 물어볼 API가 없다.
-  대신 `utilization = (틱 사이 수신 프레임 수 × 프레임당 실측 비용) / 실경과시간`을
-  쓴다. 1을 넘으면 유입이 처리를 앞질러 큐가 시간에 비례해 자란다는 뜻이라, 큐를
-  직접 세는 것과 같은 결론이 나온다. 예산은 1.0이 아니라 **0.6** — 나머지는 스냅샷
-  생성·Surge 정리·타이머 몫이다. `M = ⌈utilization / 예산⌉`, 상한 64.
-- **분자는 수신 전량이지 파싱한 수가 아니다.** 실제 소비량으로 판정하면 샘플링이
-  부하를 낮추는 순간 판정이 뒤집혀 진입·복귀를 반복한다(플래핑). 투영값은 샘플링과
-  무관하므로 원인(유입량·프레임당 비용)이 실제로 사라질 때만 복귀한다.
-- **게이트는 `JSON.parse` 앞.** 파싱한 뒤 버리면 줄이려던 비용을 그대로 치른다.
-  탈락분은 `degradedSkipped`로 세어 `dropTotal`/`drop/s`에 합산한다.
-- **시간 상수로 감은 EMA·히스테리시스.** 계수를 틱당 상수로 두면 워커가 포화돼 틱이
-  늦어질 때 평활까지 같이 느려진다 — 하필 과부하일 때 판정이 굼떠지는 구조다(실측:
-  4ms/프레임 주입에서 진입까지 12초). 매 틱 실경과시간으로 α = 1 − e^(−Δt/τ)를 다시
-  구하고, 진입(500ms)·복귀(2s) 조건도 틱 수가 아니라 실경과시간으로 센다.
-  이용률의 τ는 1초 — 이벤트 루프가 막히는 동안 프레임이 소켓에 고였다가 버스트로
-  배달되므로 짧은 창으로 보면 순간 유입률이 몇 배로 부풀고 M이 출렁인다(실측: τ=400ms에서 6↔25).
-- **타이머 기아 자가진단.** 유입이 능력을 크게 넘어서면 수신 콜백이 이벤트 루프를
-  독점해 `setInterval`이 통째로 굶는다 — 실측으로 20ms/프레임 주입에서 스냅샷이
-  **4초간 한 장도 나오지 않았다.** 판정을 타이머에만 두면 degraded는 가장 필요한
-  순간에 작동하지 않는다. 그래서 프레임 경로가 16프레임마다 "마지막 틱이 500ms 넘게
-  전인가"를 직접 보고, 그렇다면 타이머를 기다리지 않고 M을 즉시 배가한다. 정확한 M은
-  타이머가 살아난 뒤 이용률이 다시 정한다.
-- **Pulse의 정직성.** degraded 중에는 샘플링에서 탈락한 이벤트가 버킷에 들어가지
-  않으므로 Pulse의 처리량이 실제보다 낮게 그려진다. M을 곱해 보정하지 **않는다** —
-  측정한 값만 표시한다(§1). 대신 `degraded` 배너와 치솟는 `drop/s`가 그 이유를 댄다.
-- **테스트 훅:** `{ type: "debug", action: "stall", perFrameUs, durationMs }` — 프레임
-  1건을 처리할 때마다 지정한 만큼 CPU를 실제로 태운다. 측정 구간 **안에** 두었으므로
-  투영 이용률에 그대로 잡힌다. dev 빌드에서 `__jetstreamDebug.stall(4000, 15000)`.
-  실측(필터 스트림 ~230 evt/s, 2026-07-18):
+- **Decision by utilization, not queue depth.** WebSocket offers no API to query
+  the receive-queue depth. Instead we use
+  `utilization = (frames received between ticks × measured cost per frame) / actual elapsed time`.
+  A value above 1 means inflow is outpacing processing and the queue grows in
+  proportion to time — the same conclusion you'd reach by counting the queue
+  directly. The budget is not 1.0 but **0.6** — the remainder is reserved for
+  snapshot construction, Surge cleanup, and timers. `M = ⌈utilization / budget⌉`,
+  capped at 64.
+- **The numerator is total frames received, not the number parsed.** If the
+  decision used actual consumption, then the moment sampling lowered the load the
+  decision would flip and it would oscillate between entering and exiting
+  (flapping). The projected value is independent of sampling, so it recovers only
+  when the cause (inflow volume, per-frame cost) actually goes away.
+- **The gate sits before `JSON.parse`.** Dropping after parsing would still pay
+  the very cost we're trying to shed. Dropped frames are counted as
+  `degradedSkipped` and rolled into `dropTotal`/`drop/s`.
+- **EMA and hysteresis wound on time constants.** If the coefficient were a
+  per-tick constant, then when the Worker saturates and ticks slow down the
+  smoothing would slow down with them — a design in which the decision gets
+  sluggish exactly when overloaded (measured: 12 seconds to enter under a
+  4ms/frame injection). Instead we recompute `α = 1 − e^(−Δt/τ)` from actual
+  elapsed time each tick, and the enter (500ms) and exit (2s) conditions are
+  counted in actual elapsed time too, not tick counts. Utilization's τ is 1
+  second — while the event loop is blocked, frames pool in the socket and are
+  then delivered in a burst, so viewed through a short window the instantaneous
+  inflow rate inflates several-fold and M swings (measured: 6↔25 at τ=400ms).
+- **Timer-starvation self-diagnosis.** When inflow greatly exceeds capacity, the
+  receive callback monopolizes the event loop and `setInterval` starves entirely
+  — measured, a 20ms/frame injection produced **not a single snapshot for 4
+  seconds.** If the decision lived only in the timer, degraded would fail to fire
+  at the very moment it's needed most. So the frame path itself checks, every 16
+  frames, "was the last tick more than 500ms ago?" — and if so, it doubles M
+  immediately without waiting for the timer. The precise M is settled again by
+  utilization once the timer revives.
+- **Pulse's honesty.** During degraded mode, sampled-out events never enter the
+  buckets, so Pulse draws a throughput lower than reality. We do **not** correct
+  for this by multiplying by M — we show only measured values (§1). Instead, the
+  `degraded` banner and the surging `drop/s` explain why.
+- **Test hook:** `{ type: "debug", action: "stall", perFrameUs, durationMs }` —
+  for each frame processed, it actually burns the specified amount of CPU.
+  Because it sits **inside** the measured span, it's captured directly in the
+  projected utilization. In dev builds, `__jetstreamDebug.stall(4000, 15000)`.
+  Measured (filtered stream ~230 evt/s, 2026-07-18):
 
-  | 주입 | 진입 | 최대 M | 틱 지연 최대 → 안정 | 복귀 |
+  | Injection | Enter | Peak M | Tick lag peak → steady | Exit |
   |---|---|---|---|---|
-  | 4ms/프레임 | 3s | 2 | 8ms → 2ms | 주입 종료 +3s |
-  | 20ms/프레임 | 3s | 17 | 1259ms → 10ms | 주입 종료 +5s |
-  | 40ms/프레임 | 3s | 28 | 2080ms → 0.5ms | 주입 종료 +6s |
+  | 4ms/frame | 3s | 2 | 8ms → 2ms | injection end +3s |
+  | 20ms/frame | 3s | 17 | 1259ms → 10ms | injection end +5s |
+  | 40ms/frame | 3s | 28 | 2080ms → 0.5ms | injection end +6s |
 
-### 집계 상태 — 전부 고정 크기
-| 구조 | 내용 | 용도 |
+### Aggregation state — all fixed-size
+| Structure | Contents | Purpose |
 |---|---|---|
-| `rateRing` | 1초 버킷 이벤트 수 링 버퍼(최근 N초) + 현재 버킷 부분 카운트 | Pulse·Gauges |
-| `rateRing.langs` | 같은 1초 버킷 안의 언어별 post 수 + `noLangs` | Mix |
-| `tapeRing` | 최근 N개 요약 레코드 `{t, kind, collection, didShort, preview}` | Tape |
-| `surgeSlab` | 토큰별 10초 버킷 링(90개=15분) + 1m/5m/15m 롤링 합 + 분당 EMA 베이스라인, 고정 슬롯 슬랩 | Surge |
-| 게이지 상태 | 타입별(post/like/repost/follow) 누적 카운터 + 3초 EMA rate + 60초 p95·평균 | Gauges |
+| `rateRing` | Ring buffer of per-second event counts (last N seconds) + partial count of the current bucket | Pulse, Gauges |
+| `rateRing.langs` | Per-language post counts within the same 1-second bucket + `noLangs` | Mix |
+| `tapeRing` | Last N summary records `{t, kind, collection, didShort, preview}` | Tape |
+| `surgeSlab` | Per-token 10-second bucket ring (90 = 15 min) + 1m/5m/15m rolling sums + per-minute EMA baseline, in a fixed-slot slab | Surge |
+| Gauge state | Per-type (post/like/repost/follow) cumulative counters + 3-second EMA rate + 60-second p95 and average | Gauges |
 
-- `tapeRing`의 preview는 원문 일부만 잘라 보관, 그 외 원시 이벤트는 즉시 폐기.
-- 링이 가득 차 밀려나는 것은 정상 동작이지만, 스냅샷 사이에 테이프 용량을
-  초과해 유실된 건수는 `tapeDropped` 카운터로 기록한다.
+- `tapeRing`'s preview keeps only a truncated slice of the original text;
+  everything else in the raw event is discarded immediately.
+- A full ring evicting entries is normal behavior, but any records lost to
+  exceeding tape capacity between snapshots are recorded by the `tapeDropped`
+  counter.
 
-### 카운터 (HUD 노출 대상, 초안)
-`received`(수신 프레임), `parseErrors`(파싱 실패 폐기), `filteredOut`(필터로 폐기),
-`tapeDropped`(테이프 오버플로), `snapshotsSent`, `reconnects`.
-스냅샷마다 통째로 실어 보낸다 — 숫자는 전부 워커가 센 실측값만.
-Surge 테이블 통제도 카운터로 노출: `tokens`(추적 중/상한), `tok evict`(퇴출 누적),
-`tok drop`(만석으로 추적 못 한 신규 토큰 누적).
-P8에서 `cols 10s`(최근 10초의 서로 다른 collection 수 — 컬렉션 필터 토글의 관측점)를
-추가했고, 기본값에서 벗어난 상태는 숫자 한 칸이 아니라 배너 문장으로 알린다:
-`DEGRADED / parsing 1 in M · load N%`, `PAUSED · RENDER FROZEN / buffering Ts · N ev`.
-둘 다 "화면에 보이는 것이 전부가 아니다"라는 뜻이라, 놓치면 나머지 숫자를 통째로
-잘못 읽게 된다.
+### Counters (surfaced in the HUD, draft)
+`received` (frames received), `parseErrors` (dropped on parse failure),
+`filteredOut` (dropped by the filter), `tapeDropped` (tape overflow),
+`snapshotsSent`, `reconnects`. The whole set ships with every snapshot — and
+every number is a measured value counted by the Worker.
+Surge table control is surfaced through counters too: `tokens` (tracked / cap),
+`tok evict` (cumulative evictions), `tok drop` (cumulative new tokens left
+untracked because the table was full).
+P8 added `cols 10s` (the number of distinct collections in the last 10 seconds —
+the observation point for the collection-filter toggle), and any state that
+departs from the default is announced not by a single number field but by a full
+banner sentence: `DEGRADED / parsing 1 in M · load N%`,
+`PAUSED · RENDER FROZEN / buffering Ts · N ev`. Both mean "what's on screen
+isn't the whole story," so missing one makes you misread every other number.
 
-### Mix — 언어 분포 (P6)
-- **집계 위치:** 전용 구조를 새로 만들지 않고 `rateRing`의 1초 버킷에 `langs`
-  (언어 → post 수)와 `noLangs`를 얹었다. 버킷은 초마다 통째로 리셋되므로 만료
-  스윕도, 별도 파이프라인도 필요 없다.
-- **표본 단위:** post create 전수(= stride 샘플링 이전). 한 post는 `langs[0]`의
-  primary subtag 하나로만 센다 — 다국어 post를 중복 집계하지 않아야 **분포 합계가
-  표본 수와 정확히 일치**한다. 태그가 없거나 2-3자 알파벳을 벗어나면 `noLangs`로
-  세고 분포에서 뺀다(조용한 손실 없음 + 버킷 키 카디널리티 상한 역할).
-- **렌더:** 메인 스레드가 rAF 틱에서 최근 60버킷을 합산해 상위 8개 + 잔여 `other`
-  수평 막대로 그린다. `other`는 뺄셈으로 구하므로 화면의 막대 합 ≡ 표본 수.
-  막대 길이는 전체 대비 점유율이라 옆의 %와 같은 수를 말한다.
+### Mix — language distribution (P6)
+- **Where it's aggregated:** rather than building a dedicated structure, we
+  piggyback `langs` (language → post count) and `noLangs` onto `rateRing`'s
+  1-second buckets. Since each bucket is reset wholesale every second, no expiry
+  sweep and no separate pipeline are needed.
+- **Sampling unit:** every post create (i.e., before stride sampling). A post is
+  counted under exactly one language — the primary subtag of `langs[0]` —
+  because only by not double-counting multilingual posts does **the distribution
+  total match the sample count exactly**. Posts with no tag, or a tag outside
+  the 2–3-letter alphabetic form, are counted as `noLangs` and excluded from the
+  distribution (no silent loss, and it also caps the cardinality of bucket keys).
+- **Rendering:** on each rAF tick the main thread sums the last 60 buckets and
+  draws the top 8 plus a residual `other` as horizontal bars. `other` is
+  computed by subtraction, so the sum of the on-screen bars ≡ the sample count.
+  Bar length is the share of the whole, so it states the same number as the %
+  beside it.
 
-### Surge — 트렌드 랭킹 (`lib/jetstream/surge.ts`, P5 → R3 재설계)
-- **토큰화:** (1) 해시태그는 스크립트 불문 추출. (2) 라틴 스크립트 단어는 소문자화 후
-  길이 3+ · 불용어 제외(URL·멘션은 사전 제거). (3) CJK 본문은 해시태그만
-  (형태소 분석은 범위 외). 같은 post 내 중복 토큰은 1회만 집계.
-- **불용어 사전(`lib/jetstream/stopwords.ts`):** "아무 때나 쓰는 말은 트렌드가 아니다"는
-  규칙을 정적 사전으로 못 박았다. 3계층 — (1) 영어 기능어(NLTK 계열, 3자+),
-  (2) 영어 고빈도 일상어(전치사·연결부사·조동사·축약형·경동사·최상위 빈도 동사/형용사/
-  부사·시간어·숫자어·인터넷 약어·플랫폼 상용어), (3) 주요 라틴계 언어(PT·ES·FR·DE·IT·NL·ID·TR) 기능어.
-  이 파이프라인은 **해시태그(전 스크립트) + 라틴 단어**만 토큰으로 내보내므로, 해시태그는
-  본디 콘텐츠고 잡음은 라틴 단어에만 생긴다 — 라틴계 다국어 사전으로 그 잡음을 덮는다.
-  CJK·아랍 등 비라틴 본문은 해시태그로만 들어오니 사전 대상이 아니다.
-  버스트 스코어가 못 거르는 이유: 상시어(get)와 지속 트렌드(#worldcup)는 **둘 다** 배수
-  ≈1이라 통계로는 구분되지 않는다 — 이 구분은 통계가 아니라 어휘의 문제라 사전이 맞다.
-- **히스토리·롤링 합:** 토큰별 10초 버킷 링 90개(=15분). 1분/5분/15분 롤링 합은
-  버킷을 전진시킬 때 창 밖으로 밀려나는 칸만 빼는 식으로 상수 시간에 유지한다.
-- **베이스라인·스코어:** 베이스라인 = 분당 언급률의 EMA(반감기 30분, 1분 주기 배치가
-  전체 추적 토큰을 훑어 세션 시작부터 학습). `burst = (rate5m + α) / (baseline + α)` —
-  α는 라플라스 스무딩(기본 분당 2회 상당). 배수(×n.n)를 그대로 스냅샷에 싣는다.
-- **자격·워밍업:** 급상승 랭킹 진입은 5분 언급 30회 이상만. 세션 경과 2분 미만이면
-  급상승 랭킹 비활성(`baselineWarmup`), 지속 리스트는 정상 동작.
-- **순위 안정화:** ① 재정렬은 5초 주기로만(스코어 갱신은 스냅샷마다 계속),
-  ② 데드밴드 — 인접 순위 스코어 차 15% 미만이면 자리 유지, ③ 최소 체류 30초 —
-  진입 토큰은 데이터가 소멸하지 않는 한 유지(최초 채움 포함 전원), ④ 히스테리시스 —
-  진입 ×2.0 / 퇴출 ×1.4. 전부 런타임 튜닝 가능(`surgeTune` 명령, 세션 한정) —
-  개발 모드에서 "t" 키로 튜닝 패널(components/Tuner.tsx)이 열린다.
-- **두 리스트(토큰 범위가 다르다):** 급상승은 **단어+해시태그 전체**를 배수 정렬,
-  지속은 **해시태그만** 15분 절대 언급량 단순 top — 각 top 10. 볼륨 순위(지속)는 배경을
-  통계로 못 거른다 — 상시어("get")와 지속 트렌드("#worldcup")가 둘 다 배수 ≈ 1이라
-  burst로 구분되지 않으니, 이 리스트만은 "의도적으로 붙인" 해시태그로 한정한다. 실측상
-  post의 11.9%만 해시태그를 달지만 파이어호스 유량이 커서(약 19 태그언급/초, 서로 다른
-  태그 267종/15초) top 10은 충분히 찬다 — 2026-07-18 js2.us-east 실측. 단어 트렌드는
-  배경을 baseline으로 눌러주는 급상승 쪽이 담당한다.
-  항목마다 1m/5m/15m 카운트, 배수, 15분 스파크라인(10초 버킷 90개 → 30포인트),
-  직전 재정렬 대비 순위 변동, 라이프사이클(1분 rate ≥ 5분 rate×1.3 급등 /
-  ≤×0.7 하강 / 진입 60초 이내 신규 / 나머지 유지).
-- **메모리 통제:** 토큰마다 객체를 만들지 않고 `SURGE_MAX_TOKENS`(50,000) 슬롯의
-  TypedArray 슬랩에서 슬롯을 할당·회수한다(counts 링 9MB + 합·베이스라인 ≈ 1.4MB로 고정).
-  만석이면 신규 토큰은 `dropped`로 세고 추적하지 않는다. 정리 패스(30초 주기)는
-  위생 TTL(10분 무활동)을 기본으로 퇴출하되, 점유율이 85%를 넘으면 압력 밸브가
-  TTL을 반씩 조여(하한 45초) 상한 아래로 회수한다 — TTL은 위생 값을 넘지 않으므로
-  죽은 토큰이 슬롯을 영영 물지 않는다.
-- **작업량:** 이벤트당은 post 토큰 수에 비례하는 O(1) 범위. 시간 비례 작업은 주기로
-  묶는다 — 재정렬 스캔은 5초(활성 집합), 베이스라인은 1분(전체 추적), 정리는 30초.
+### Surge — trend ranking (`lib/jetstream/surge.ts`, P5 → R3 redesign)
+- **Tokenization:** (1) hashtags are extracted regardless of script. (2)
+  Latin-script words are lowercased, then kept if length 3+ and not a stopword
+  (URLs and mentions are stripped beforehand). (3) CJK body text contributes
+  hashtags only (morphological analysis is out of scope). Duplicate tokens
+  within the same post are counted once.
+- **Stopword dictionary (`lib/jetstream/stopwords.ts`):** the rule "words used at
+  any time aren't trends" is nailed down as a static dictionary. Three layers —
+  (1) English function words (NLTK-style, 3+ letters); (2) high-frequency
+  everyday English (prepositions, conjunctive adverbs, modals, contractions,
+  light verbs, top-frequency verbs/adjectives/adverbs, time words, number words,
+  internet abbreviations, platform boilerplate); (3) function words of the major
+  Latin-script languages (PT, ES, FR, DE, IT, NL, ID, TR).
+  This pipeline emits only **hashtags (all scripts) + Latin words** as tokens,
+  so hashtags are content by nature and the noise arises only in the Latin words
+  — which the multi-language Latin dictionary covers. Non-Latin body text such
+  as CJK and Arabic enters only as hashtags, so it isn't a dictionary target.
+  Why the burst score can't filter these out: an always-on word (get) and a
+  sustained trend (#worldcup) **both** have a multiplier ≈ 1, so statistics
+  can't tell them apart — this distinction is a matter of vocabulary, not
+  statistics, so a dictionary is the right tool.
+- **History and rolling sums:** a per-token ring of 90 ten-second buckets
+  (= 15 min). The 1-, 5-, and 15-minute rolling sums are maintained in constant
+  time by subtracting only the cells that fall out of the window as the buckets
+  advance.
+- **Baseline and score:** the baseline is an EMA of the per-minute mention rate
+  (30-minute half-life; a once-per-minute batch sweeps all tracked tokens,
+  learning from the start of the session). `burst = (rate5m + α) / (baseline + α)`
+  — α is Laplace smoothing (default equivalent to 2 mentions/minute). The
+  multiplier (×n.n) is carried into the snapshot as-is.
+- **Eligibility and warmup:** entry into the surge ranking requires at least 30
+  mentions in 5 minutes. If the session is less than 2 minutes old, the surge
+  ranking is inactive (`baselineWarmup`); the sustained list operates normally.
+- **Rank stabilization:** ① reordering only every 5 seconds (score updates
+  continue every snapshot); ② deadband — if adjacent ranks differ by less than
+  15% in score, they hold position; ③ minimum dwell of 30 seconds — an entered
+  token stays as long as its data hasn't expired (everyone, including the initial
+  fill); ④ hysteresis — enter ×2.0 / exit ×1.4. All of it is runtime-tunable
+  (the `surgeTune` command, session-scoped) — in dev mode, the "t" key opens the
+  tuning panel (`components/Tuner.tsx`).
+- **Two lists (with different token scopes):** Surge sorts **all words +
+  hashtags** by multiplier; Sustained is a simple top of **hashtags only** by
+  absolute 15-minute mention volume — each a top 10. A volume ranking
+  (Sustained) can't filter its background statistically — since an always-on word
+  ("get") and a sustained trend ("#worldcup") both have a multiplier ≈ 1 and
+  can't be told apart by burst, this one list is restricted to "deliberately
+  attached" hashtags. Empirically only 11.9% of posts carry a hashtag, but the
+  firehose's volume is high enough (about 19 tag mentions/second, 267 distinct
+  tags per 15 seconds) that the top 10 fills up fine — measured on js2.us-east,
+  2026-07-18. Word trends are handled by the surge side, which suppresses the
+  background with the baseline.
+  Each item carries 1m/5m/15m counts, the multiplier, a 15-minute sparkline
+  (90 ten-second buckets → 30 points), the rank change since the last
+  reordering, and a lifecycle state (surging if 1-minute rate ≥ 5-minute rate ×
+  1.3 / falling if ≤ ×0.7 / new if entered within the last 60 seconds / holding
+  otherwise).
+- **Memory control:** instead of allocating an object per token, we allocate and
+  reclaim slots from a `SURGE_MAX_TOKENS` (50,000)-slot TypedArray slab (fixed
+  at a 9MB counts ring + ≈ 1.4MB for sums and baselines). When full, new tokens
+  are counted as `dropped` and not tracked. The cleanup pass (every 30 seconds)
+  evicts on a hygiene TTL (10 minutes of inactivity) by default, but if occupancy
+  exceeds 85% a pressure valve tightens the TTL by half each pass (floor 45
+  seconds) to reclaim back below the cap — the TTL never exceeds the hygiene
+  value, so a dead token never holds a slot forever.
+- **Workload:** per-event work is O(1), scaling with the number of tokens in the
+  post. Time-proportional work is batched on intervals — the reorder scan every
+  5 seconds (active set), the baseline every 1 minute (all tracked), cleanup
+  every 30 seconds.
 
-## 4. 메시지 프로토콜 (초안 — P1에서 `lib/jetstream/protocol.ts`로 확정)
+## 4. Message protocol (draft — finalized in `lib/jetstream/protocol.ts` at P1)
 
-확정본은 `lib/jetstream/protocol.ts`. main → worker는 `connect` / `disconnect` /
-`setFilter` / `surgeTune`(Surge 튜닝, 세션 한정) / `debug(drop | stall)` 다섯 가지고,
-worker → main은 `StreamSnapshot` 객체 그 자체다(래핑 없음).
+The finalized version lives in `lib/jetstream/protocol.ts`. Main → worker is five
+messages — `connect` / `disconnect` / `setFilter` / `surgeTune` (Surge tuning,
+session-scoped) / `debug(drop | stall)` — and worker → main is the
+`StreamSnapshot` object itself (no wrapper).
 
-- **Pause 의미론(설계 결정, P8에서 확정):** Pause는 "화면 갱신 정지"다. 워커는 계속
-  수신·집계한다. **다만 워커에는 아무 명령도 보내지 않는다** — 정지는 메인 스레드의
-  렌더 게이트(`lib/jetstream/renderGate.ts`)가 전담하고, 패널들이 rAF 틱에서
-  `isRenderPaused()`를 보고 그리기를 건너뛴다. 초안은 "워커가 스냅샷 발송을 중단"
-  이었지만 그러면 정지 중 HUD가 보여줄 실측값이 사라진다. **버퍼링이 얼마나 쌓였는가가
-  Pause를 데모하는 숫자**라, 스냅샷은 계속 받고 소비만 끊는 쪽으로 바꿨다.
-  - 스냅샷 객체는 항상 최신 하나로 덮이므로 정지 중에도 메모리는 자라지 않고, 재개는
-    "밀린 프레임 따라잡기"가 아니라 최신 한 장으로의 점프가 된다(실측: 재개 후 3 rAF,
-    ~19ms 안에 최신 스냅샷 값과 일치).
-  - Tape만은 스냅샷마다 델타 행을 받으므로 정지 중 그 배치를 통째로 버린다. 쌓아뒀다
-    쏟아내면 그게 곧 밀린 프레임 따라 그리기라, 재개 비용이 정지 길이에 비례하게 된다.
-  - **HUD는 Pause의 예외다.** 계기판까지 멈추면 "정지 중에 무슨 일이 벌어지는가"를 볼
-    수단이 사라진다. 정지 진입 시각의 `recvTotal`을 기준선으로 잡고
-    `paused · render frozen / buffering 5.1s · 1,203 ev`를 10Hz로 갱신한다 —
-    Pause가 렌더 정지일 뿐 수집 정지가 아니라는 사실이 여기서 증명된다.
-  - 소켓을 끊는 동작은 별도의 `disconnect`다.
+- **Pause semantics (design decision, finalized at P8):** Pause means "stop
+  updating the screen." The Worker keeps ingesting and aggregating. **It's just
+  that no command is sent to the Worker** — the pause is handled entirely by the
+  main thread's render gate (`lib/jetstream/renderGate.ts`), and panels check
+  `isRenderPaused()` on the rAF tick and skip drawing. The draft had "the Worker
+  stops sending snapshots," but that would erase the measured values the HUD
+  needs to show while paused. **How much buffering has accumulated is the number
+  that demonstrates Pause**, so we switched to still receiving snapshots and
+  cutting only consumption.
+  - The snapshot object is always overwritten by the latest one, so memory
+    doesn't grow even while paused, and resuming is a jump to the single latest
+    frame rather than "catching up on backlogged frames" (measured: within 3
+    rAF, ~19ms after resume, it matches the latest snapshot values).
+  - Tape is the exception: it receives delta rows with every snapshot, so while
+    paused we discard those batches wholesale. Piling them up and then dumping
+    them would amount to redrawing backlogged frames, making the resume cost
+    scale with the pause length.
+  - **The HUD is the exception to Pause.** If the instrument panel froze too,
+    we'd lose any way to see "what's happening while paused." Taking the
+    `recvTotal` at the moment of pause entry as a baseline, it updates
+    `paused · render frozen / buffering 5.1s · 1,203 ev` at 10Hz — proving right
+    here that Pause is a render stop, not a collection stop.
+  - Closing the socket is a separate `disconnect`.
 
-- **컬렉션 필터(P8):** `filtered`(`app.bsky.feed.*` + `app.bsky.graph.follow`) ↔
-  `full`(파라미터 없음 = 전체). 필터는 소켓 URL의 쿼리라 바꾸려면 다시 여는 수밖에
-  없지만, **재개 커서를 그대로 재사용**하므로 전환 구간이 비지 않는다. 의도된 재연결
-  이라 갭 마커도 남기지 않고 백오프도 타지 않는다(`Connection.setFilter`). 버튼 라벨의
-  근거는 낙관적 로컬 상태가 아니라 스냅샷의 `conn.filter` — 전환이 실패해도 거짓말하지 않는다.
+- **Collection filter (P8):** `filtered` (`app.bsky.feed.*` +
+  `app.bsky.graph.follow`) ↔ `full` (no parameter = everything). The filter is a
+  query on the socket URL, so changing it means reopening, but because it
+  **reuses the resume cursor as-is**, the switchover interval isn't empty. Being
+  an intentional reconnect, it leaves no gap marker and doesn't go through
+  backoff (`Connection.setFilter`). The button label is grounded not in
+  optimistic local state but in the snapshot's `conn.filter` — so it doesn't lie
+  even if the switch fails.
 
-## 5. 메인 스레드 렌더링 (P1+)
+## 5. Main-thread rendering (P1+)
 
-- 워커 생성·통신은 React 밖의 모듈이 담당. React에는 저빈도 값(연결 상태,
-  필터 선택, pause 여부, Surge 탭 선택)만 상태로 올린다.
-- 스냅샷 수신 → `snapshotRef.current` 교체가 전부. rAF 루프가 ref를 읽어
-  canvas를 그리고, 텍스트류(HUD 숫자 등)는 `textContent` 직접 갱신.
-- Gauges(R2)는 타입별 4개 셀을 마운트 시 1회 만들고, rAF에서 채움(`transform:
-  scaleY` — 리플로우 없음)·EMA 숫자·델타를 직접 갱신한다. 1초 경계는 스냅샷의
-  `gauges.sec` 변화로 감지해 80ms 플러시 후 재충전. 채움 분모는 워커가 계산한
-  60초 p95, 큰 숫자는 3초 EMA, 델타는 1분 평균 대비 %(|3%| 이내 "안정").
-  타입 색은 `lib/palette.ts` 하나에서 오고 차트 시리즈와 공유한다.
-- Pulse는 uPlot 스택 영역 차트로 구현(전폭 15vh 밴드). 인스턴스는 마운트 시 1회
-  생성하고, 이후에는 rAF 틱마다 `setData`만 호출한다. 갭/리플레이 띠는 uPlot
-  `draw` 훅에서 시리즈 위에 얹는다 — opts는 1회 생성이므로 최신 갭 목록은 게터로
-  넘겨 매 draw마다 읽는다. 우측 끝에는 시리즈별 현재값 라벨(마지막 완결 버킷 값,
-  겹침 방지 배치)을 오버레이로 얹고, 호버 시 내장 커서(setCursor 훅)에 툴팁을 단다.
-- Tape(R1에서 세로 테이프로 전환)는 TanStack Virtual 가상화 + 행 2줄 말줄임
-  (메타 한 줄 + 본문 `-webkit-line-clamp: 2`). 행 높이 상수(56px)는 가상화
-  estimateSize·스크롤 보정과 맞물린다.
-- Mix는 9개(상위 8 + other) 막대 행을 마운트 시 1회 만들고, rAF 틱마다 스냅샷이
-  바뀔 때만 `textContent`와 채움 막대의 `style.width`를 갱신한다.
-- Surge(R4)는 SURGE_LIST_N(10)개 행 풀을 마운트 시 1회 만들고 토큰에 바인딩해
-  재사용한다. 순위 이동은 FLIP — `transform: translateY`만 바꾸고 CSS transition
-  400ms가 흐른다(리플로우 없음). 재정렬은 워커가 5초 주기로만 하므로 재배치도
-  5초에 한 번. 신규 진입 행은 하이라이트 배경이 30초에 걸쳐 감쇠(rAF에서 감쇠 중인
-  행만 갱신). 탭 2개(급상승·지속)는 저빈도 컨트롤이라 React 상태, 행 내용은 전부
-  rAF 직접 갱신. 워밍업 중 급상승 탭은 "베이스라인 학습 중 · n분 경과"를 표시.
-- HUD(R1에서 플로팅 → 우측 컬럼 하단 고정 배치)는 rAF에서 값 노드 textContent만
-  직접 갱신한다. Pause의 예외라는 성질은 그대로다.
-- **측정 모드(P9, `lib/perf/measurement.ts`)** — 성능 검증을 눈으로 받아 적지 않기 위한
-  계측 계층. HUD의 rAF 루프가 프레임 간격을 매 틱, 스냅샷 실측 카운터를 **벽시계 초마다**
-  레코더에 먹이고, 레코더가 60초 창으로 묶어 통계를 낸다. 비활성일 때는 함수 호출 하나로
-  끝나 데이터 경로에 부담이 없다.
-  - 창 롤오버 기준은 `performance.now()`라 **CPU 스로틀링에 영향받지 않는다**(60초는 실제
-    60초). 초 표본은 벽시계 초로 중복 제거하므로 10Hz 스냅샷을 10배로 세지 않는다.
-  - 창에 담기는 것: `recv/proc/drop`의 min·p50·avg·p95·max, 프레임 간격의 p50·p95·p99·max·n,
-    degraded 초 수·최대 M·최대 load·최대 틱 지연, Surge/Tape 상한 델타. 그리고 워커가
-    **실제 적용 중인** 튜닝값(`surge.tuning`의 에코)을 함께 실어 "어떤 설정에서 잰 수치인가"를
-    수치와 분리할 수 없게 묶는다.
-  - 토글은 "m" 키, 켜지면 HUD 머리줄에 `● REC {창 수}`. 하니스용 핸들은
-    `__jetstreamMeasureCtl`(dev 전용).
-  - 초 표본이 없는 창은 버린다 — 측정 종료가 창 경계에 걸리면 프레임 표본 한두 개만 든
-    껍데기 창이 남아 recv/drop이 전부 0으로 잡힌다(실측으로 발견해 고친 버그).
-- **상태 오버레이(P9, `components/DeckStatus.tsx`)** — `connecting`(최초 연결 전 빈 상태)과
-  `failed`(지속 장애 에러 상태) **두 상태에서만** 뜨는 앰비언트 레이어. `reconnecting`은
-  짧고 패널이 직전 데이터를 얼린 채 배지·HUD가 이미 알리므로 덮지 않는다.
-  `pointer-events: none`이라 헤더 컨트롤을 가두지 않는다 — 상태를 알리는 스킨이지 모달이
-  아니다. 중앙만 진하고 가장자리는 옅은 스크림이라 그 아래 배지가 계속 읽힌다.
+- Worker creation and communication are handled by a module outside React. Only
+  low-frequency values (connection state, filter selection, pause status, Surge
+  tab selection) are lifted into React state.
+- Receiving a snapshot → swapping `snapshotRef.current` is all there is to it.
+  The rAF loop reads the ref and draws the canvas, while text (HUD numbers, etc.)
+  is updated directly via `textContent`.
+- Gauges (R2) build four per-type cells once at mount, then update the fill
+  (`transform: scaleY` — no reflow), the EMA number, and the delta directly on
+  rAF. The one-second boundary is detected via a change in the snapshot's
+  `gauges.sec`, triggering an 80ms flush before refilling. The fill's denominator
+  is the Worker-computed 60-second p95, the large number is the 3-second EMA, and
+  the delta is a % against the 1-minute average ("stable" within |3%|). Type
+  colors come from the single `lib/palette.ts` and are shared with the chart
+  series.
+- Pulse is implemented as a uPlot stacked-area chart (full-width 15vh band). The
+  instance is created once at mount; after that, each rAF tick only calls
+  `setData`. Gap/replay bands are laid over the series in uPlot's `draw` hook —
+  since `opts` is created once, the latest gap list is passed via a getter and
+  read on every draw. At the right edge, an overlay places per-series
+  current-value labels (the last completed bucket's value, positioned to avoid
+  overlap), and on hover the built-in cursor (the `setCursor` hook) gets a
+  tooltip.
+- Tape (switched to a vertical tape at R1) uses TanStack Virtual virtualization
+  plus two-line row truncation (one meta line + body
+  `-webkit-line-clamp: 2`). The row-height constant (56px) is tied into the
+  virtualizer's `estimateSize` and scroll correction.
+- Mix builds nine (top 8 + other) bar rows once at mount, and on each rAF tick
+  updates `textContent` and the fill bars' `style.width` only when the snapshot
+  has changed.
+- Surge (R4) builds a pool of `SURGE_LIST_N` (10) rows once at mount and reuses
+  them by binding to tokens. Rank movement is FLIP — only `transform:
+  translateY` changes and a 400ms CSS transition plays (no reflow). Since the
+  Worker reorders only every 5 seconds, repositioning also happens once every 5
+  seconds. A newly entered row's highlight background decays over 30 seconds (rAF
+  updates only the rows still decaying). The two tabs (Surge, Sustained) are
+  low-frequency controls, so they're React state; row content is all updated
+  directly on rAF. During warmup, the Surge tab shows "learning baseline · n min
+  elapsed."
+- The HUD (moved from floating to a fixed spot at the bottom of the right column
+  at R1) updates only the value nodes' `textContent` directly on rAF. Its
+  property of being the exception to Pause is unchanged.
+- **Measurement mode (P9, `lib/perf/measurement.ts`)** — an instrumentation
+  layer so that performance verification isn't transcribed by eye. The HUD's rAF
+  loop feeds the frame interval every tick, and the snapshot's measured counters
+  **every wall-clock second**, into a recorder, which groups them into 60-second
+  windows and computes statistics. When inactive, it's a single function call, so
+  it adds no burden to the data path.
+  - Window rollover is keyed on `performance.now()`, so it's **unaffected by CPU
+    throttling** (60 seconds is a real 60 seconds). Per-second samples are
+    deduplicated by wall-clock second, so 10Hz snapshots aren't counted 10×.
+  - What a window holds: min/p50/avg/p95/max of recv/proc/drop, p50/p95/p99/max/n
+    of the frame interval, degraded second-count / peak M / peak load / peak tick
+    lag, and Surge/Tape cap deltas. It also carries the tuning values the Worker
+    is **actually applying** (an echo of `surge.tuning`), binding "under what
+    settings these numbers were measured" inseparably to the numbers themselves.
+  - The toggle is the "m" key; when on, the HUD header line shows
+    `● REC {window count}`. The harness handle is `__jetstreamMeasureCtl` (dev
+    only).
+  - Windows with no per-second samples are discarded — if measurement ends right
+    on a window boundary, a shell window holding just one or two frame samples
+    remains, capturing recv/drop as all zeros (a bug found and fixed
+    empirically).
+- **Status overlay (P9, `components/DeckStatus.tsx`)** — an ambient layer that
+  appears **only in two states**: `connecting` (the empty state before the first
+  connection) and `failed` (the error state of a sustained outage).
+  `reconnecting` is brief and the panels freeze the prior data while the badge
+  and HUD already announce it, so it isn't covered. Being `pointer-events: none`,
+  it doesn't trap the header controls — it's a skin that signals state, not a
+  modal. Only the center is dense while the edges are a faint scrim, so the badge
+  beneath it stays readable.
 
-## 6. 디자인 시스템 — "야간 비행 계기판"
+## 6. Design system — "Night-flight instrument panel"
 
-Jetstream(제트기류)과 Bluesky라는 주제에서 가져온 방향: 야간 운항 계기판.
-푸른 잉크빛 배경 위 계기 모듈들, 숫자는 전부 모노스페이스 tabular-nums.
+The direction drawn from the subject matter — Jetstream (the jet stream) and
+Bluesky: a night-flight cockpit. Instrument modules over an inky-blue
+background, with every number in monospace tabular-nums.
 
-### 토큰
-| 토큰 | 값 | 용도 |
+### Tokens
+| Token | Value | Purpose |
 |---|---|---|
-| `--bg` | `#070b11` | 바탕 (심야) |
-| `--surface` | `#0c141d` | 패널 |
-| `--line` | `#1c2836` | 헤어라인 테두리 |
-| `--tick` | `#3d5573` | 패널 코너 틱 (시그니처) |
-| `--text` | `#d7e2ee` | 본문 |
-| `--muted` | `#72869b` | 보조 텍스트 |
-| `--faint` | `#5a6e88` | 빈 상태·자리표시 (P9에서 `#47586c`→ 대비 확보) |
-| `--accent` | `#4ba3ff` | Bluesky 블루 |
-| `--ok` / `--warn` / `--danger` | `#46d7a4` / `#e8b04b` / `#e5484d` | 상태 시맨틱 |
+| `--bg` | `#070b11` | Background (deep night) |
+| `--surface` | `#0c141d` | Panels |
+| `--line` | `#1c2836` | Hairline borders |
+| `--tick` | `#3d5573` | Panel corner ticks (signature) |
+| `--text` | `#d7e2ee` | Body text |
+| `--muted` | `#72869b` | Secondary text |
+| `--faint` | `#5a6e88` | Empty states, placeholders (raised from `#47586c` at P9 for contrast) |
+| `--accent` | `#4ba3ff` | Bluesky blue |
+| `--ok` / `--warn` / `--danger` | `#46d7a4` / `#e8b04b` / `#e5484d` | Status semantics |
 
-- 타입: IBM Plex Mono(데이터·라벨·숫자) + IBM Plex Sans(일반 텍스트).
-  패널 이름은 계기판 명판(placard)처럼 모노 대문자 + 넓은 자간.
-- 시그니처: 각 패널 대각(좌상·우하) 모서리의 오실로스코프식 코너 틱 하나뿐.
-  나머지는 전부 절제.
+- Type: IBM Plex Mono (data, labels, numbers) + IBM Plex Sans (regular text).
+  Panel names are mono uppercase with wide letter-spacing, like an instrument
+  placard.
+- Signature: a single oscilloscope-style corner tick at each panel's diagonal
+  corners (top-left and bottom-right). Everything else is restrained.
 
-### 레이아웃 (R1 — Surge가 주인공)
+### Layout (R1 — Surge is the star)
 ```
 ┌──────────────────── header ─────────────────────┐
-├─ POST ──┬─ LIKE ──┬─ REPOST ─┬─ FOLLOW ─────────┤  게이지 스트립 (4셀)
-├──────────────── PULSE (15vh 밴드) ──────────────┤
-├──────────── 62% ────────────┬────── 38% ────────┤  ≥1280px: 단일 화면
-│                             │       TAPE        │  <1280px: 세로 스택
+├─ POST ──┬─ LIKE ──┬─ REPOST ─┬─ FOLLOW ─────────┤  gauge strip (4 cells)
+├─────────────── PULSE (15vh band) ───────────────┤
+├──────────── 62% ────────────┬────── 38% ────────┤  ≥1280px: single screen
+│                             │       TAPE        │  <1280px: vertical stack
 │           SURGE             ├───────────────────┤
-│      (탭: 급상승/지속)       │     MIX (소형)     │
+│   (tabs: Surge/Sustained)   │   MIX (compact)   │
 │                             ├───────────────────┤
-│                             │  HUD (컬럼 하단)   │
+│                             │ HUD (col. bottom) │
 └─────────────────────────────┴───────────────────┘
 ```
 
-## 7. 파일 구조 (목표)
+## 7. File structure (target)
 
 ```
-app/            셸 페이지, 글로벌 스타일, 폰트
-components/     Header, Panel, Hud 등 프레젠테이션 셸
+app/            shell page, global styles, fonts
+components/     Header, Panel, Hud, etc. — presentation shell
 lib/jetstream/  worker.ts, aggregate.ts, protocol.ts   (P1+)
-docs/           이 문서
+docs/           this document
 ```
 
-## 8. 로드맵
+## 8. Roadmap
 
-| 단계 | 내용 |
+| Phase | Contents |
 |---|---|
-| **P0 (완료)** | 스캐폴드 + 레이아웃 셸: 빈 패널 5개, 헤더, HUD 자리 |
-| P1 | 워커 + WS 연결 + 파싱/카운터 + HUD 실측값 + 연결 배지 |
-| P2 | Pulse: rate 링 버퍼 + uPlot 스택 영역 차트 |
-| P3 | Tape: 테이프 링 + DOM 노드 풀 렌더 |
-| **P5 (완료)** | Surge: 토큰 버스트 감지(EMA + z-score), 슬랩 메모리 통제, 스파크라인 |
-| **P6 (완료)** | Mix: 1초 버킷에 언어 카운트를 얹어 최근 60초 언어 분포(상위 8 + other) |
-| **P7 (완료)** | 연결 견고성: 백오프 재연결, `cursor` 되감기 재개, 인스턴스 페일오버, 갭/리플레이 마커, 상태 표시 확장, 강제 단절 디버그 훅 |
-| **P8 (완료)** | 백프레셔 3단계 완성: Pause(렌더 게이트 + 버퍼링 계측), degraded 1/M 파싱 샘플링(자동 진입·복귀, 처리 지연 주입 훅), 컬렉션 필터 토글(커서 재사용 재연결) |
-| **R1 (완료)** | 레이아웃 재배치: 게이지 스트립 / 전폭 Pulse 밴드(15vh) / 좌 62% Surge(주인공) / 우 38% 컬럼(Tape 세로 2줄 · Mix 소형 · HUD 컬럼 하단) |
-| **R2 (완료)** | 게이지 셀 구현(채움 scaleY + 80ms 플러시, 3초 EMA 숫자, 1분 평균 델타) + 차트 개선(팔레트 공유 `lib/palette.ts`, 우측 현재값 라벨, 호버 툴팁) |
-| **R3 (완료)** | Surge 워커 재설계: 10초 버킷 링 90개 + 롤링 합, 분당 EMA 베이스라인(반감기 30분), 라플라스 배수 스코어, 자격·워밍업·재정렬 5초·데드밴드·체류·히스테리시스, 튜닝 패널("t") |
-| **R4 (완료)** | Surge UI 재설계: 탭(급상승·지속), FLIP 400ms(행 풀 재사용·transform만), 라이프사이클 칩(신규/급등/유지/하강), 신규 하이라이트 30초 감쇠, 워커 실설정값 상태줄 |
-| **P9 (완료)** | 측정 모드(60초 창 통계 → JSON), 저사양·degraded·소크 실측 라운드, 빈/에러 상태 디자인, 색 대비 실측 조정, 케이스 스터디 재료(`docs/CASE-STUDY.md`) |
+| **P0 (done)** | Scaffold + layout shell: 5 empty panels, header, HUD placeholder |
+| P1 | Worker + WS connection + parsing/counters + measured HUD values + connection badge |
+| P2 | Pulse: rate ring buffer + uPlot stacked-area chart |
+| P3 | Tape: tape ring + DOM node-pool rendering |
+| **P5 (done)** | Surge: token burst detection (EMA + z-score), slab memory control, sparklines |
+| **P6 (done)** | Mix: language counts layered onto 1-second buckets for the last-60-second language distribution (top 8 + other) |
+| **P7 (done)** | Connection robustness: backoff reconnect, `cursor` rewind-resume, instance failover, gap/replay markers, expanded status display, forced-disconnect debug hook |
+| **P8 (done)** | Backpressure three tiers completed: Pause (render gate + buffering instrumentation), degraded 1/M parse sampling (auto enter/exit, processing-lag injection hook), collection-filter toggle (cursor-reusing reconnect) |
+| **R1 (done)** | Layout rearrangement: gauge strip / full-width Pulse band (15vh) / left 62% Surge (the star) / right 38% column (Tape two-line vertical, Mix compact, HUD at column bottom) |
+| **R2 (done)** | Gauge cell implementation (fill via scaleY + 80ms flush, 3-second EMA number, 1-minute average delta) + chart improvements (shared palette `lib/palette.ts`, right-edge current-value labels, hover tooltips) |
+| **R3 (done)** | Surge worker redesign: 90 ten-second bucket rings + rolling sums, per-minute EMA baseline (30-minute half-life), Laplace multiplier score, eligibility / warmup / 5-second reorder / deadband / dwell / hysteresis, tuning panel ("t") |
+| **R4 (done)** | Surge UI redesign: tabs (Surge, Sustained), FLIP 400ms (row-pool reuse, transform only), lifecycle chips (new/surging/holding/falling), 30-second decay on new-entry highlight, worker-applied-settings status line |
+| **P9 (done)** | Measurement mode (60-second window stats → JSON), low-spec / degraded / soak measurement rounds, empty/error state design, empirically tuned color contrast, case-study material (`docs/CASE-STUDY.md`) |
 
-## 9. 확인된 사실 vs 가정
+## 9. Confirmed facts vs assumptions
 
-- Jetstream 엔드포인트 주소, 쿼리 파라미터(`wantedCollections` 등), 메시지
-  스키마는 **P1 구현 시점에 공식 저장소(bluesky-social/jetstream) 문서로 검증**
-  후에 코드에 넣는다. 이 문서의 프로토콜 필드는 초안이다.
-- P7 시점(2026-07-18) 공식 저장소는 v2 재작성 중이라 배포된 공개 인스턴스의
-  `cursor` 의미론이 문서와 어긋난다(v2 스펙은 시퀀스 번호 기반). 그래서 문서 대신
-  **공개 인스턴스 4대를 직접 찔러 실측**한 뒤 코드에 넣었다: 4대 모두 `subscribe`
-  응답, `cursor`는 마이크로초 epoch로 되감기 동작, 재생 속도는 실시간의 약 10배,
-  라이브 테일의 `time_us` 지연은 p95 0.06초. 이 문서의 임계값들은 그 실측치다.
-- "초당 수백~수천 이벤트"는 브리프가 준 전제로 취급하고, UI에는 워커가 실측한
-  숫자만 표시한다.
-- **풀 스트림 토글의 관측점은 `recv/s`가 아니다(P8, 전제 수정).** 공개 인스턴스에
-  두 URL로 각각 12초 붙어 실측한 결과(2026-07-18, js2.us-east):
+- The Jetstream endpoint address, query parameters (`wantedCollections`, etc.),
+  and message schema go into the code only after being **verified against the
+  official repository (bluesky-social/jetstream) docs at the time of P1
+  implementation**. The protocol fields in this document are a draft.
+- As of P7 (2026-07-18) the official repository is mid-v2-rewrite, so the
+  deployed public instances' `cursor` semantics diverge from the docs (the v2
+  spec is sequence-number-based). So instead of the docs, we **poked all four
+  public instances directly and measured** before putting it in code: all four
+  respond to `subscribe`, `cursor` rewinds by microsecond epoch, replay speed is
+  about 10× real-time, and the live-tail `time_us` lag is p95 0.06s. The
+  thresholds in this document are those measured values.
+- "Hundreds to thousands of events per second" is treated as a premise given by
+  the brief; the UI shows only numbers the Worker measured itself.
+- **The observation point for the full-stream toggle is not `recv/s` (P8,
+  premise revised).** From connecting to a public instance on both URLs for 12
+  seconds each and measuring (2026-07-18, js2.us-east):
 
-  | | recv/s | 컬렉션 종류 |
+  | | recv/s | Collection types |
   |---|---|---|
-  | `feed.*` + `graph.follow` | 226 | 6종 |
-  | 파라미터 없음(전체) | 253 | 25종 |
+  | `feed.*` + `graph.follow` | 226 | 6 |
+  | No parameter (everything) | 253 | 25 |
 
-  기본 필터가 이미 파이어호스의 **약 89%**를 덮고 있어서 필터를 풀어도 유입은 +12%
-  남짓이고, 이는 1초 창의 정상 요동(±10%)에 묻힌다. 반면 컬렉션 **종류**는 6 ↔ 25로
-  뚜렷하게 갈린다. 그래서 HUD에 `cols 10s`(최근 10초에 등장한 서로 다른 collection 수)
-  행을 두어 토글의 효과를 관측한다 — 데크에서 6 → 29로 확인(창 길이가 10초라 직접 프로브
-  보다 희귀 컬렉션을 더 많이 잡는다). Pulse의 `other` 시리즈가 두꺼워지는 것도 같은 사실의
-  다른 표현이다. "필터를 풀면 recv/s가 뛴다"는 기대는 2026년 실제 파이어호스 구성에서는
-  성립하지 않는다.
+  The default filter already covers **about 89%** of the firehose, so removing it
+  raises inflow by only ~12%, which is buried in the normal ±10% fluctuation of a
+  1-second window. The number of collection **types**, on the other hand, splits
+  sharply, 6 ↔ 25. So the HUD carries a `cols 10s` row (the number of distinct
+  collections seen in the last 10 seconds) to observe the toggle's effect —
+  confirmed 6 → 29 on the deck (with a 10-second window, it catches more rare
+  collections than the direct probe did). Pulse's `other` series thickening is
+  another expression of the same fact. The expectation that "removing the filter
+  makes recv/s jump" doesn't hold for the actual 2026 firehose configuration.

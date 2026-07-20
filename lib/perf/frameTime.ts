@@ -1,13 +1,13 @@
-// 프레임 타임(rAF 간격) 수집 유틸. HUD(P2)뿐 아니라 이후 단계의 렌더 계측에도
-// 재사용한다 — React/DOM에 의존하지 않고, rAF 루프를 직접 돌리지도 않는다.
-// 이미 돌고 있는 rAF 루프가 매 틱 sample(now)를 호출해주는 구조.
+// Frame time (rAF interval) collection utility. Reused not only by the HUD (P2) but also by the
+// render instrumentation in later stages — it does not depend on React/DOM, and does not run an
+// rAF loop of its own. The design is that an already-running rAF loop calls sample(now) each tick.
 
 export interface FrameTimeMeter {
-  /** rAF 콜백이 받은 타임스탬프(ms)를 매 틱 넘긴다. 첫 호출은 기준점만 잡는다. */
+  /** Hand over the timestamp (ms) the rAF callback received, each tick. The first call only establishes the baseline. */
   sample(now: number): void;
-  /** 기록된 표본의 p-분위값(ms, 0 < p ≤ 1, nearest-rank). 표본이 없으면 NaN. */
+  /** The p-quantile of the recorded samples (ms, 0 < p ≤ 1, nearest-rank). NaN if there are no samples. */
   percentile(p: number): number;
-  /** 탭 비활성화 등으로 rAF가 끊겼다 돌아올 때 호출 — 끊긴 구간을 표본에서 제외. */
+  /** Call when rAF resumes after being cut off (tab deactivation, etc.) — excludes the gap from the samples. */
   reset(): void;
 }
 

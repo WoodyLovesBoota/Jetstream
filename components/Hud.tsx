@@ -20,12 +20,14 @@ import {
 } from "@/lib/perf/measurement";
 import styles from "./Hud.module.css";
 
-// HUD는 React를 마운트에만 쓴다. 이후의 모든 갱신은 rAF 루프가 값 노드의
-// textContent를 직접 바꾸는 것뿐 — 데이터 경로에서 리렌더 금지 원칙(설계 §1.3).
+// The HUD uses React only to mount. Every update after that is nothing but the
+// rAF loop swapping the textContent of the value nodes directly — the no-
+// rerenders-on-the-data-path principle (design §1.3).
 //
-// HUD만은 Pause의 예외다. 다른 패널이 전부 얼어붙는 동안 계기판까지 멈추면
-// "정지 중에 무슨 일이 벌어지고 있는가"를 볼 수단이 사라진다 — Pause가 렌더 정지일
-// 뿐 수집 정지가 아니라는 사실 자체가 여기서 증명돼야 한다.
+// The HUD alone is the exception to Pause. If the instrument panel stopped too
+// while every other panel froze, the means of seeing "what is happening during
+// the pause" would be gone — the very fact that Pause stops rendering and not
+// collection has to be proven right here.
 
 const ROWS = [
   ["recv/s", "recv"],
@@ -42,25 +44,27 @@ const ROWS = [
 
 type RowKey = (typeof ROWS)[number][1];
 
-/** 스냅샷 실측 주기 = 최근 N회 도착 간격의 평균 */
+/** Measured snapshot interval = the mean of the last N arrival gaps */
 const GAP_WINDOW = 10;
 
-/** 텍스트 갱신은 스냅샷과 같은 10Hz — 그보다 잦으면 읽을 수 없고 이득도 없다 */
+/** Text updates run at 10Hz, same as the snapshot — any faster is unreadable and buys nothing */
 const TEXT_INTERVAL_MS = 100;
 
-/** 10,000 이상은 "12.3k"로 축약 — HUD 폭 안에 tracked/cap을 담기 위해 */
+/** 10,000 and up is abbreviated to "12.3k" — to fit tracked/cap within the HUD width */
 function compact(n: number): string {
   return n >= 10_000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k` : String(n);
 }
 
-/** cols 행이 훑는 구간(초) — 희귀 컬렉션은 초당 몇 건이라 1초 창으로는 안 잡힌다 */
+/** The span (seconds) the cols row sweeps — rare collections run a few events per second and a 1s window misses them */
 const COLS_WINDOW_SEC = 10;
 
 /**
- * 최근 구간에 등장한 서로 다른 collection 수. 컬렉션 필터 토글의 관측점이다 —
- * recv/s는 필터를 풀어도 실측 +12% 남짓이라(feed.* + follow가 이미 파이어호스의
- * 대부분) 1초 창의 요동에 묻히지만, 종류 수는 6 ↔ 25로 뚜렷하게 갈린다.
- * Set은 틱마다 재사용해 10Hz 할당을 만들지 않는다.
+ * The number of distinct collections seen over the recent span. This is the
+ * observation point for the collection filter toggle — dropping the filter
+ * raises recv/s by only about +12% measured (feed.* + follow are already most
+ * of the firehose), which gets lost in the jitter of a 1s window, but the
+ * number of kinds splits clearly, 6 ↔ 25.
+ * The Set is reused every tick so it makes no allocations at 10Hz.
  */
 function countCollections(snapshot: StreamSnapshot, into: Set<string>): number {
   into.clear();
@@ -72,10 +76,12 @@ function countCollections(snapshot: StreamSnapshot, into: Set<string>): number {
 }
 
 /**
- * 연결 상태 한 줄. 뒤에 붙는 초는 상태마다 다른 것을 가리킨다 —
- * 재시도 중에는 다음 시도까지 남은 대기(백오프가 실제로 벌어지는지 보이도록),
- * 연결돼 있을 때는 마지막 이벤트가 벽시계보다 뒤처진 정도(리플레이 중 0으로 수렴).
- * HUD는 우하단에 떠 있어 Mix 패널을 가리므로 행 수를 늘리지 않고 이 한 줄에 담는다.
+ * The connection state, in one line. The trailing seconds mean something
+ * different per state — while retrying, the wait left until the next attempt
+ * (so you can see the backoff actually widening); while connected, how far the
+ * last event lags the wall clock (converging to 0 during replay).
+ * The HUD floats at the bottom right and covers the Mix panel, so this is
+ * packed into this one line rather than adding rows.
  */
 function connText(conn: StreamSnapshot["conn"]): string {
   if (conn.state === "reconnecting" || conn.state === "failed") {
@@ -99,7 +105,7 @@ export default function Hud() {
   const pausedDetailRef = useRef<HTMLSpanElement | null>(null);
 
   useEffect(() => {
-    // ref 콜백은 커밋 시점에 전부 채워진 뒤 이 이펙트가 돈다
+    // The ref callbacks are all filled in at commit time before this effect runs
     const els = valueEls.current as Record<RowKey, HTMLElement>;
     const instEl = instRef.current;
     const root = rootRef.current;
@@ -123,7 +129,7 @@ export default function Hud() {
     let gapIdx = 0;
     let gapCount = 0;
     let lastArrival = NaN;
-    // 측정 모드 피드용 — 프레임 간격 계산과 초 단위 표본 중복 방지
+    // For the measurement mode feed — frame interval calculation and dedup of per-second samples
     let prevFrameNow = NaN;
     let lastMeasureSec = -1;
 
@@ -148,7 +154,7 @@ export default function Hud() {
       lastArrival = now;
     });
 
-    // 탭이 숨겨지면 rAF도 스냅샷 표시도 멈춘다 — 복귀 시 공백 구간을 표본에서 제외
+    // When the tab is hidden, both rAF and snapshot display stop — on return, exclude the blank span from the samples
     const onVisibilityChange = () => {
       meter.reset();
       lastArrival = NaN;
@@ -157,8 +163,10 @@ export default function Hud() {
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
 
-    // 정지 진입 시점의 수신 누적을 기준선으로 잡는다. "정지 중 워커가 계속 받아
-    // 집계한 이벤트 수" = 지금 누적 − 기준선 — 전부 워커가 센 실측값의 차다.
+    // Take the received total at the moment of entering pause as the baseline.
+    // "Events the worker kept receiving and aggregating during the pause" =
+    // current total − baseline — a difference of measured values, all counted
+    // by the worker.
     let recvAtPause = 0;
     let wasPaused = false;
     let wasDegraded = false;
@@ -171,9 +179,11 @@ export default function Hud() {
     let raf = requestAnimationFrame(function tick(now) {
       meter.sample(now);
 
-      // ── 측정 모드 피드 ──
-      // 프레임 간격은 매 틱, 초 단위 실측치(전부 스냅샷에서 온 값)는 벽시계 초가
-      // 바뀔 때 한 번. 비활성이면 레코더가 스스로 무시하므로 오버헤드는 함수 호출뿐.
+      // ── measurement mode feed ──
+      // Frame intervals every tick; the per-second measured values (all of them
+      // coming from the snapshot) once whenever the wall-clock second changes.
+      // When inactive the recorder ignores them itself, so the overhead is just
+      // the function call.
       const rec = measurement();
       if (rec.active()) {
         rec.noteFrame(now, Number.isNaN(prevFrameNow) ? 0 : now - prevFrameNow);
@@ -234,9 +244,10 @@ export default function Hud() {
           els.ws.dataset.state = conn.state;
           if (instEl !== null) setText(instEl, conn.instance);
 
-          // ── degraded 배너 ──
-          // 1/M 샘플링은 drop/s를 키우는 유일한 무증상 원인이라, 켜져 있다는 사실과
-          // M이 얼마인지를 숫자 옆이 아니라 문장으로 못 박아 둔다.
+          // ── degraded banner ──
+          // 1/M sampling is the only symptomless cause of a rising drop/s, so
+          // the fact that it is on and what M currently is get nailed down in a
+          // sentence rather than beside a number.
           const bp = snapshot.backpressure;
           if (bp.degraded !== wasDegraded) {
             wasDegraded = bp.degraded;
@@ -249,9 +260,10 @@ export default function Hud() {
           root.dataset.m = String(bp.m);
         }
 
-        // ── paused 배너 ──
-        // 스냅샷 도착 여부와 무관하게 갱신한다 — 정지 중에도 경과 시간은 흘러야 하고,
-        // 그게 곧 "워커는 멈추지 않았다"는 증거다.
+        // ── paused banner ──
+        // Updated regardless of whether a snapshot arrived — the elapsed time
+        // has to keep running during the pause, and that is precisely the
+        // evidence that "the worker did not stop".
         const paused = isRenderPaused();
         if (paused !== wasPaused) {
           wasPaused = paused;
@@ -281,10 +293,10 @@ export default function Hud() {
     };
   }, []);
 
-  // 측정 모드 토글 — "m" 키(입력 필드 밖에서만) + dev 전역 핸들.
-  // 전역 핸들은 verify 하니스(headless)가 호출한다:
+  // Measurement mode toggle — the "m" key (only outside input fields) + a dev
+  // global handle. The global handle is what the (headless) verify harness calls:
   //   __jetstreamMeasureCtl.start("throttle-6x-full", { throttleRate: 6 })
-  //   __jetstreamMeasureCtl.json()   → 60초 창 통계 JSON 문자열
+  //   __jetstreamMeasureCtl.json()   → 60s window stats as a JSON string
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!isPlainHotkey(e, "m")) return;
@@ -321,20 +333,21 @@ export default function Hud() {
       <div className={styles.head}>
         <span className={styles.title}>HUD</span>
         <span className={styles.headRight}>
-          {/* 측정 모드 표시 — "m" 키/하니스로 켤 때만 보인다(닫힌 창 수를 함께 센다) */}
+          {/* Measurement mode indicator — visible only when switched on by the "m" key or the harness (it also counts the closed windows) */}
           <span className={styles.rec} ref={recRef} data-rec hidden>
             ● REC
           </span>
-          {/* 붙어 있는 인스턴스 — 페일오버가 일어나면 여기가 바뀐다 */}
+          {/* The instance currently attached — this is what changes on failover */}
           <span className={styles.instance} ref={instRef} data-instance>
             —
           </span>
         </span>
       </div>
       {/*
-        기본값에서 벗어난 상태는 숫자 한 칸이 아니라 문장으로 알린다 — degraded와
-        pause는 둘 다 "화면에 보이는 것이 전부가 아니다"라는 뜻이라, 놓치면 나머지
-        숫자를 통째로 잘못 읽게 된다. aria-live로 스크린리더에도 전이를 알린다.
+        States that deviate from the defaults are announced in a sentence, not a
+        single number slot — degraded and pause both mean "what you see on
+        screen is not all of it", and missing that makes you misread every other
+        number wholesale. aria-live announces the transitions to screen readers too.
       */}
       <div className={styles.notices} aria-live="polite">
         <p className={styles.notice} data-kind="degraded" ref={degradedRef} hidden>

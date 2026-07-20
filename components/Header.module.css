@@ -14,7 +14,7 @@
 }
 
 .mark {
-  margin: 0; /* h1 기본 마진 제거 — 표제 시맨틱만 취하고 배치는 그대로 */
+  margin: 0; /* Drop the default h1 margin — take only the heading semantics, keep the layout */
   font-family: var(--font-mono), var(--font-kr), monospace;
   font-size: 15px;
   font-weight: 600;
@@ -75,7 +75,7 @@
   box-shadow: 0 0 6px var(--ok);
 }
 
-/* 되감기 재생 중 — 데이터는 들어오지만 과거 구간이라 live와 구분한다 */
+/* Rewind playback — data is still arriving, but it is a past window, so it is distinguished from live */
 .badge[data-state="replaying"] {
   color: var(--text);
   border-color: var(--tick);
@@ -140,7 +140,7 @@
   cursor: not-allowed;
 }
 
-/* 기본값에서 벗어난 컨트롤은 눈에 띄어야 한다 — 지금 화면이 왜 이런지의 설명이라서 */
+/* Controls that deviate from their defaults must stand out — they explain why the screen looks the way it does */
 .btn[data-filter="full"] {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);

@@ -1,34 +1,39 @@
 # Jetstream Deck
 
-Bluesky Jetstream(공개 WebSocket 파이어호스)을 브라우저에서 직접 구독해
-실시간 대시보드로 보여주는 Next.js(App Router) + TypeScript 단일 화면 앱.
+A single-screen Next.js (App Router) + TypeScript app that subscribes directly to
+the Bluesky Jetstream (public WebSocket firehose) from the browser and renders it
+as a real-time dashboard.
 
-- 수신·파싱·집계는 전부 Web Worker, 원시 이벤트는 집계 즉시 폐기
-- 워커 → 메인은 10Hz 고정 스냅샷(postMessage), 메인은 rAF로 canvas/DOM 페인트
-- 버리는 모든 지점에 카운터를 달아 HUD에 노출
-- SharedArrayBuffer 미사용, 외부 상태관리 라이브러리 미사용
+- Ingest, parsing, and aggregation all run in a Web Worker; raw events are discarded
+  the moment they are aggregated
+- Worker → main thread is a fixed 10 Hz snapshot (`postMessage`); the main thread
+  paints canvas/DOM via `requestAnimationFrame`
+- Every point where data is dropped is instrumented with a counter, surfaced in the HUD
+- No `SharedArrayBuffer`, no external state-management library
 
-설계 문서: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+Design document: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
-## 실행
+## Running
 
 ```bash
 pnpm install
 pnpm run dev
 ```
 
-http://localhost:3000 에서 확인. 뷰포트 1280px 이상에서 단일 화면(무스크롤)
-레이아웃, 그 미만에서는 세로 스택으로 전환된다.
+Open http://localhost:3000. At viewport widths of 1280px and above the layout is a
+single screen (no scrolling); below that it switches to a vertical stack.
 
-## 현재 단계
+## Current stage
 
-**P7** — 연결 견고성. 단절되면 지수 백오프(1s→30s, 지터)로 재연결하고,
-마지막 이벤트의 `time_us − 5초`를 `cursor`로 실어 되감기 재개한다. 재연결이
-거듭 실패하면 공식 인스턴스 4대(us-east/us-west 각 2대)를 순환 페일오버한다.
-되감기 재생 중에는 상태가 `replaying`이고, 이미 반영한 구간은 중복 없이 버려진다
-(카운터 노출). 단절 구간은 Pulse 차트에 띠로 남아 "비어 있는 갭"과 "리플레이로
-메워진 구간"이 다른 색으로 구분된다.
+**P7** — Connection robustness. On disconnect it reconnects with exponential backoff
+(1s→30s, with jitter) and resumes by replaying from a `cursor` set to the last event's
+`time_us − 5 seconds`. If reconnection keeps failing, it cycles through failover across
+the four official instances (two each in us-east/us-west). While replaying, the state is
+`replaying`, and any range already applied is discarded without duplication (surfaced via
+a counter). Disconnected spans remain as a band on the Pulse chart, so an "empty gap" and
+a "range backfilled by replay" are distinguished by different colors.
 
-복구 경로 재현(dev): 콘솔에서 `__jetstreamDebug.drop(30000)` — 소켓을 끊고
-30초간 재연결까지 실패시킨다. DevTools의 오프라인 토글은 이미 열린 WebSocket을
-끊지 못하므로(수신만 멈춘다) 진짜 단절 재현에는 이 명령을 쓴다.
+Reproducing the recovery path (dev): in the console, run `__jetstreamDebug.drop(30000)` —
+this severs the socket and makes reconnection fail for 30 seconds. The DevTools offline
+toggle cannot sever an already-open WebSocket (it only stops inbound traffic), so use this
+command to reproduce a real disconnect.

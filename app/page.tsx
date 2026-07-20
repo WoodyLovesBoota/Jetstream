@@ -10,8 +10,8 @@ import Surge from "@/components/Surge";
 import Tape from "@/components/Tape";
 import styles from "./page.module.css";
 
-// 배치(위 → 아래): 헤더 / 타입별 게이지 스트립 / 전폭 스루풋 밴드(Pulse) /
-// 메인 그리드 — 좌 62% Surge(주인공), 우 38% 컬럼에 Tape · Mix · HUD.
+// Layout (top → bottom): header / per-type gauge strip / full-width throughput band (Pulse) /
+// main grid — 62% left for Surge (the lead), Tape · Mix · HUD in the 38% right column.
 
 export default function Home() {
   return (
@@ -35,9 +35,9 @@ export default function Home() {
           <Hud />
         </div>
       </main>
-      {/* 연결 전(빈 상태)·지속 장애(에러 상태)를 계기판 언어로 덮는 앰비언트 레이어 */}
+      {/* Ambient layer that covers pre-connection (empty state) and sustained failure (error state) in instrument-panel language */}
       <DeckStatus />
-      {/* 개발 전용 Surge 튜닝 패널 — "t" 키로 토글, 프로덕션에선 렌더되지 않는다 */}
+      {/* Dev-only Surge tuning panel — toggled with the "t" key, never rendered in production */}
       <Tuner />
     </div>
   );

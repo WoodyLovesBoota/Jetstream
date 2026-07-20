@@ -1,5 +1,6 @@
-// 메인 스레드 DOM 직접 갱신 헬퍼 — rAF 루프가 textContent·dataset·속성을 만지는
-// 패널들이 공유한다. 같은 값 재대입을 막는 변경 가드를 한 곳에 두는 것이 전부다.
+// Helpers for direct DOM updates on the main thread — shared by the panels whose rAF loops touch
+// textContent/dataset/attributes. All they do is keep the change guard that avoids reassigning the
+// same value in one place.
 
 export function setText(el: HTMLElement, text: string): void {
   if (el.textContent !== text) el.textContent = text;
@@ -14,8 +15,9 @@ export function setAttr(el: HTMLElement, name: string, value: string): void {
 }
 
 /**
- * 수식키 없는 단일 문자 단축키인지. 입력 필드(input/textarea/contentEditable)에
- * 포커스가 있으면 타이핑으로 취급해 무시한다 — Hud("m")·Tuner("t")가 공유한다.
+ * Whether this is a single-character hotkey with no modifier keys. If an input field
+ * (input/textarea/contentEditable) has focus, it is treated as typing and ignored — shared by
+ * Hud ("m") and Tuner ("t").
  */
 export function isPlainHotkey(e: KeyboardEvent, key: string): boolean {
   if (e.key !== key || e.metaKey || e.ctrlKey || e.altKey) return false;

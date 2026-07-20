@@ -12,35 +12,37 @@ import { subscribeStream } from "@/lib/jetstream/useStreamWorker";
 import { setData, setText } from "@/lib/dom";
 import styles from "./Surge.module.css";
 
-// Surge — 트렌드 랭킹의 주인공 패널. React는 탭 버튼(저빈도 컨트롤)과 고정
-// SURGE_LIST_N개 행 풀의 마운트에만 쓴다. 이후의 모든 데이터 갱신은 rAF 루프가
-// textContent·dataset·canvas·transform을 직접 만진다 — 리렌더 금지(설계 §1.3).
+// Surge — the headline panel of the trend ranking. React is used only to mount
+// the tab buttons (low-frequency controls) and the fixed pool of SURGE_LIST_N
+// rows. Every data update after that is the rAF loop touching textContent,
+// dataset, canvas and transform directly — no rerenders (design §1.3).
 //
-// FLIP: 행 DOM은 토큰에 바인딩된 채 재사용되고, 순위가 바뀌면 transform:
-// translateY만 바꾼다(CSS transition 400ms). 리플로우 없는 이동 — 재정렬은
-// 워커가 5초 주기로만 하므로 화면은 5초마다 한 번 부드럽게 재배치된다.
+// FLIP: row DOM stays bound to a token and is reused, and when the rank changes
+// only transform: translateY changes (a 400ms CSS transition). Movement without
+// reflow — and since the worker only re-sorts on a 5s cycle, the screen
+// smoothly rearranges itself once every 5 seconds.
 
 type Tab = "surging" | "sustained";
 
-/** 행 높이(px) — translateY 계산과 Surge.module.css의 .row 높이가 맞물린 값 */
+/** Row height (px) — the value that ties the translateY math to .row's height in Surge.module.css */
 const ROW_H = 40;
 
-/** 스파크라인 논리 크기(px) — dpr 배율은 마운트 시 1회 적용 */
+/** Sparkline logical size (px) — the dpr scaling is applied once at mount */
 const SPARK_W = 96;
 const SPARK_H = 20;
 
-/** 신규 진입 하이라이트가 감쇠하는 시간 */
+/** How long the new-entry highlight takes to decay */
 const HIGHLIGHT_MS = 30_000;
 
-// canvas는 CSS 변수를 못 읽는다 — globals.css 토큰값을 그대로 옮김
-const SPARK_ACCENT = "#4ba3ff"; // --accent, 급등 상태
-const SPARK_NEUTRAL = "#47586c"; // --faint, 그 외
+// canvas cannot read CSS variables — the globals.css token values are copied verbatim
+const SPARK_ACCENT = "#4ba3ff"; // --accent, the rising state
+const SPARK_NEUTRAL = "#47586c"; // --faint, everything else
 
 const LIFE_LABEL: Record<SurgeLifecycle, string> = {
-  new: "신규",
-  rising: "급등",
-  steady: "유지",
-  falling: "하강",
+  new: "new",
+  rising: "rising",
+  steady: "steady",
+  falling: "falling",
 };
 
 interface Row {
@@ -52,11 +54,11 @@ interface Row {
   c5: HTMLElement;
   mult: HTMLElement;
   chip: HTMLElement;
-  /** 지금 이 행이 표시 중인 토큰. 빈 행은 "" */
+  /** The token this row is currently displaying. "" for an empty row */
   bound: string;
-  /** 신규 진입 하이라이트 시작 시각(ms). 없으면 -Infinity */
+  /** When the new-entry highlight started (ms). -Infinity if there is none */
   entryAtMs: number;
-  /** data-instant(전환 억제)를 해제할 시각(ms) */
+  /** When to clear data-instant (transition suppression) (ms) */
   instantUntilMs: number;
 }
 
@@ -78,7 +80,7 @@ function drawSpark(ctx: CanvasRenderingContext2D, spark: number[], rising: boole
 
   const n = spark.length;
   const stepX = SPARK_W / (n - 1);
-  // 1.5px 선이 위아래로 잘리지 않게 상하 0.75px 여백을 두고 스케일링
+  // Scale with 0.75px of headroom top and bottom so the 1.5px line is not clipped
   const yOf = (v: number) => SPARK_H - 0.75 - (v / max) * (SPARK_H - 1.5);
   const stroke = rising ? SPARK_ACCENT : SPARK_NEUTRAL;
 
@@ -147,21 +149,23 @@ export default function Surge() {
       snapshot = s;
     });
 
-    // 탭별 "최초 채움" 플래그 — 세션 첫 리스트 전체가 신규 하이라이트로 번쩍이지 않게
+    // Per-tab "initial fill" flag — keeps the session's first full list from flashing entirely as new-entry highlights
     const firstFill: Record<Tab, boolean> = { surging: true, sustained: true };
 
     /**
-     * 리스트를 행 풀에 반영한다. 토큰이 이미 행에 바인딩돼 있으면 그 행을 재사용해
-     * transform만 갱신(FLIP)하고, 새 토큰은 빈 행을 받아 제자리에서 나타난다.
-     * instant=true(탭 전환)면 모든 이동을 전환 없이 즉시 적용한다.
+     * Reflects the list into the row pool. If a token is already bound to a row,
+     * that row is reused and only its transform is updated (FLIP); a new token
+     * takes an empty row and appears in place.
+     * With instant=true (a tab switch), every move is applied immediately with
+     * no transition.
      */
     function render(items: SurgeItem[], now: number, instant: boolean): void {
       const activeTab = tabRef.current;
       const shown = items.slice(0, rows.length);
-      const wanted = new Map<string, number>(); // token → 목표 순위
+      const wanted = new Map<string, number>(); // token → target rank
       for (let i = 0; i < shown.length; i++) wanted.set(shown[i].token, i);
 
-      // 1) 떠난 토큰의 행을 회수한다
+      // 1) Reclaim the rows of tokens that left
       const rowOf = new Map<string, Row>();
       const free: Row[] = [];
       for (const row of rows) {
@@ -173,7 +177,7 @@ export default function Surge() {
         }
       }
 
-      // 2) 목표 순위대로 내용·위치를 갱신한다
+      // 2) Update contents and positions to the target ranks
       for (let i = 0; i < shown.length; i++) {
         const item = shown[i];
         let row = rowOf.get(item.token);
@@ -181,7 +185,7 @@ export default function Surge() {
         if (row === undefined) {
           row = free.pop() as Row;
           row.bound = item.token;
-          // 새 행은 목표 자리에서 바로 나타난다 — 어디선가 날아오는 것처럼 보이면 거짓말
+          // A new row appears right at its target slot — making it look like it flew in from somewhere would be a lie
           row.instantUntilMs = now + 60;
           setData(row.root, "instant", "true");
           row.entryAtMs = firstFill[activeTab] || instant ? Number.NEGATIVE_INFINITY : now;
@@ -205,13 +209,13 @@ export default function Surge() {
         const y = `translateY(${i * ROW_H}px)`;
         if (row.root.style.transform !== y) row.root.style.transform = y;
         if (isNewBinding && !instant && row.entryAtMs === now) {
-          // 진입 하이라이트는 즉시 점등 — 감쇠는 매 프레임 decayHighlights가 맡는다
+          // The entry highlight lights up immediately — decayHighlights handles the decay each frame
           row.root.style.backgroundColor = "rgba(75, 163, 255, 0.16)";
         }
       }
       if (shown.length > 0) firstFill[activeTab] = false;
 
-      // 3) 남은 빈 행은 감춘다
+      // 3) Hide the remaining empty rows
       for (const row of free) {
         if (row.bound === "") {
           setData(row.root, "filled", "false");
@@ -225,7 +229,7 @@ export default function Surge() {
       }
     }
 
-    /** 신규 진입 배경의 30초 감쇠 — 하이라이트 중인 행만 만진다 */
+    /** The 30s decay of the new-entry background — touches only the rows currently highlighted */
     function decayHighlights(now: number): void {
       for (const row of rows) {
         if (row.entryAtMs === Number.NEGATIVE_INFINITY) continue;
@@ -240,7 +244,7 @@ export default function Surge() {
       }
     }
 
-    /** 탭 전환 억제 해제 — data-instant를 걸어둔 행을 시한이 지나면 되돌린다 */
+    /** Clearing the tab-switch suppression — rows carrying data-instant are reverted once their deadline passes */
     function clearInstant(now: number): void {
       for (const row of rows) {
         if (row.instantUntilMs !== Number.NEGATIVE_INFINITY && now >= row.instantUntilMs) {
@@ -253,7 +257,7 @@ export default function Surge() {
     let lastSnapshot: StreamSnapshot | null = null;
     let lastTab: Tab = tabRef.current;
     let raf = requestAnimationFrame(function tick(now) {
-      // Pause 중에는 랭킹·하이라이트·상태줄 전부 얼린다 — 화면은 한 시점이어야 읽힌다
+      // While paused, freeze the ranking, the highlights and the status line alike — the screen is only readable if it is a single moment in time
       if (isRenderPaused()) {
         raf = requestAnimationFrame(tick);
         return;
@@ -268,24 +272,24 @@ export default function Surge() {
         const surgingTab = lastTab === "surging";
         const warmup = surge.baselineWarmup;
 
-        // 워밍업 중 급상승 탭은 리스트 대신 학습 경과를 보여준다 — 지속 탭은 정상
+        // During warmup the surging tab shows the learning progress instead of the list — the sustained tab is normal
         const showWarmup = surgingTab && warmup.active;
         if (wrap!.dataset.warmup !== String(showWarmup)) {
           wrap!.dataset.warmup = String(showWarmup);
         }
         if (showWarmup) {
-          setText(warmupEl!, `베이스라인 학습 중 · ${(warmup.elapsedSec / 60).toFixed(1)}분 경과`);
+          setText(warmupEl!, `learning baseline · ${(warmup.elapsedSec / 60).toFixed(1)}m elapsed`);
           render([], now, tabChanged);
         } else {
           render(surgingTab ? surge.surging : surge.sustained, now, tabChanged);
         }
 
-        // 하단 상태줄 — 전부 워커 실측·실설정값
+        // The bottom status line — all worker-measured and actually-configured values
         const t = surge.tuning;
         setText(
           statusEl!,
-          `순위 갱신 ${t.resortSec}초 주기 · 베이스라인 학습 ${(warmup.elapsedSec / 60).toFixed(0)}분` +
-            ` · 최소 지지 ${t.minSupport}회/5분`,
+          `rank refresh every ${t.resortSec}s · baseline learning ${(warmup.elapsedSec / 60).toFixed(0)}m` +
+            ` · min support ${t.minSupport}/5m`,
         );
       }
       decayHighlights(now);
@@ -304,8 +308,8 @@ export default function Surge() {
     setTab(next);
   }
 
-  // ARIA 탭 패턴: 방향키로 탭 이동 + 포커스 동행(roving tabindex). 탭이 둘뿐이라
-  // 좌우 어느 쪽이든 "다른 탭"으로 간다.
+  // ARIA tab pattern: arrow keys move between tabs and focus follows (roving
+  // tabindex). There are only two tabs, so either direction goes to "the other tab".
   function handleTablistKey(e: React.KeyboardEvent): void {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
     e.preventDefault();
@@ -319,7 +323,7 @@ export default function Surge() {
       <div
         className={styles.tabs}
         role="tablist"
-        aria-label="Surge 리스트"
+        aria-label="Surge list"
         onKeyDown={handleTablistKey}
       >
         <button
@@ -333,7 +337,7 @@ export default function Surge() {
           ref={surgingTabRef}
           onClick={() => switchTab("surging")}
         >
-          급상승 · 5분
+          surging · 5m
         </button>
         <button
           type="button"
@@ -346,7 +350,7 @@ export default function Surge() {
           ref={sustainedTabRef}
           onClick={() => switchTab("sustained")}
         >
-          지속 · #태그
+          sustained · #tags
         </button>
       </div>
       <div
@@ -365,7 +369,7 @@ export default function Surge() {
           <span className={styles.sparkCol}>15m</span>
           <span className={styles.c5}>5m</span>
           <span className={styles.mult}>×</span>
-          <span className={styles.chipCol}>상태</span>
+          <span className={styles.chipCol}>status</span>
         </div>
         <ol className={styles.list} style={{ height: SURGE_LIST_N * ROW_H }} ref={listRef}>
           {Array.from({ length: SURGE_LIST_N }, (_, i) => (
@@ -373,7 +377,7 @@ export default function Surge() {
               <span className={styles.rank} data-cell="rank" />
               <span className={styles.delta} data-cell="delta" data-dir="flat" />
               <span className={styles.token} data-cell="token" />
-              {/* 스파크라인은 보조 채널 — 수치는 5m/× 텍스트가 이미 전달한다 */}
+              {/* The sparkline is a secondary channel — the 5m/× text already carries the values */}
               <canvas
                 className={styles.sparkCol}
                 data-cell="spark"
@@ -390,13 +394,13 @@ export default function Surge() {
           ))}
         </ol>
         <p className={styles.warmup} ref={warmupRef}>
-          베이스라인 학습 중
+          learning baseline
         </p>
         <p className={styles.empty}>awaiting trends…</p>
       </div>
       <div className={styles.statusBar}>
         <span ref={statusRef} className={styles.status}>
-          순위 갱신 —
+          rank refresh —
         </span>
       </div>
     </div>

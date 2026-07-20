@@ -12,13 +12,15 @@ import { subscribeStream } from "@/lib/jetstream/useStreamWorker";
 import { setAttr, setText } from "@/lib/dom";
 import styles from "./Mix.module.css";
 
-// Mix는 React를 고정 MIX_TOP_N+1개 막대 행의 마운트에만 쓴다. 이후 갱신은 rAF 루프가
-// textContent·style.width를 직접 만진다 — 데이터 경로 리렌더 금지(설계 §1.3).
+// Mix uses React only to mount the fixed MIX_TOP_N+1 bar rows. Every update
+// after that is the rAF loop touching textContent and style.width directly —
+// no rerenders on the data path (design §1.3).
 //
-// 집계는 워커가 이미 1초 버킷에 넣어둔 langs/noLangs를 최근 MIX_WINDOW_SEC개만큼
-// 훑어 합산하는 것이 전부다. 별도 파이프라인도, 스냅샷 전용 필드도 없다.
+// The aggregation is nothing more than sweeping the last MIX_WINDOW_SEC of the
+// langs/noLangs the worker already put into the 1s buckets and summing them.
+// There is no separate pipeline and no snapshot-only field.
 
-/** 상위 언어 + other 잔여 한 줄 */
+/** Top languages + one row for the "other" remainder */
 const ROW_COUNT = MIX_TOP_N + 1;
 const OTHER_ROW = MIX_TOP_N;
 
@@ -39,8 +41,10 @@ function formatPct(count: number, total: number): string {
 }
 
 /**
- * 최근 MIX_WINDOW_SEC개 버킷의 언어 카운트를 합산한다. 버킷 배열은 항상 오래된 것 →
- * 최신 순이고 마지막 칸은 진행 중인 부분 카운트다 — 그대로 포함해야 라이브로 움직인다.
+ * Sums the language counts over the last MIX_WINDOW_SEC buckets. The bucket
+ * array is always ordered oldest → newest and the final slot is the
+ * in-progress partial count — it has to be included as is for the display to
+ * move live.
  */
 function collect(
   buckets: SecondBucket[],
@@ -62,16 +66,18 @@ function collect(
 }
 
 /**
- * 상위 MIX_TOP_N개 + 잔여 합산 other. other는 뺄셈으로 구하므로 화면에 세운 막대의
- * 합은 항상 total과 정확히 같다 — 완료 기준(합계 = 표본 수)이 성립하는 지점.
+ * The top MIX_TOP_N + an "other" row summing the remainder. Because other is
+ * derived by subtraction, the bars drawn on screen always sum to exactly total
+ * — the point where the completion criterion (sum = sample count) holds.
  *
- * 언어 수가 MIX_TOP_N 이하면 상위가 곧 전부라 잔여가 0이고 other 줄은 생기지 않는다.
- * 따라서 other가 붙는 경우 그 자리는 언제나 마지막 칸(OTHER_ROW)이다.
+ * If there are MIX_TOP_N or fewer languages, the top rows are everything, the
+ * remainder is 0, and no other row appears. So whenever other is present, its
+ * position is always the last slot (OTHER_ROW).
  */
 function rank(counts: Map<string, number>, total: number): Slice[] {
   const sorted: Slice[] = [];
   for (const [lang, count] of counts) sorted.push({ lang, count });
-  // 동률일 때 코드순으로 고정 — 안 그러면 같은 값끼리 매 틱 자리를 바꿔 깜빡인다
+  // Break ties by code order — otherwise equal values swap places every tick and flicker
   sorted.sort((a, b) => b.count - a.count || (a.lang < b.lang ? -1 : 1));
 
   const top = sorted.slice(0, MIX_TOP_N);
@@ -103,7 +109,7 @@ export default function Mix() {
       });
     }
 
-    // "en" → "English". 미지원 환경이나 모르는 코드면 코드를 그대로 보여준다.
+    // "en" → "English". On unsupported environments or unknown codes, show the code as is.
     let displayNames: Intl.DisplayNames | null = null;
     try {
       displayNames = new Intl.DisplayNames(["en"], { type: "language" });
@@ -125,7 +131,7 @@ export default function Mix() {
       snapshot = s;
     });
 
-    // 틱마다 재사용 — 10Hz로 Map을 새로 만들지 않는다
+    // Reused every tick — do not allocate a new Map at 10Hz
     const counts = new Map<string, number>();
 
     function paint(s: StreamSnapshot): void {
@@ -139,7 +145,7 @@ export default function Mix() {
           ` · ${counts.size.toLocaleString("en-US")} langs` +
           ` · nolang ${noLangs.toLocaleString("en-US")}`,
       );
-      // 표본 수를 DOM에도 실어둔다 — 막대 합계와의 일치를 밖에서 검산할 수 있게
+      // Put the sample count on the DOM too — so the match against the bar sum can be checked from outside
       setAttr(root!, "data-total", String(total));
 
       if (empty) {
@@ -164,7 +170,7 @@ export default function Mix() {
         setText(row.label, slice.lang);
         setText(row.pct, formatPct(slice.count, total));
 
-        // 막대 길이 = 전체 표본 대비 점유율. %와 같은 수를 말한다.
+        // Bar length = share of the total sample. It states the same number as the %.
         const width = `${((slice.count / total) * 100).toFixed(2)}%`;
         if (row.fill.style.width !== width) row.fill.style.width = width;
 
@@ -181,13 +187,13 @@ export default function Mix() {
 
     let lastSnapshot: StreamSnapshot | null = null;
     let raf = requestAnimationFrame(function tick() {
-      // Pause 중에는 페인트를 건너뛴다 — 재개 시 최신 스냅샷 한 장으로 점프한다
+      // While paused, skip painting — on resume, jump to a single latest snapshot
       if (isRenderPaused()) {
         raf = requestAnimationFrame(tick);
         return;
       }
 
-      // 스냅샷은 10Hz — 그 외 프레임은 참조 비교 한 번으로 끝난다
+      // Snapshots are 10Hz — every other frame ends at a single reference comparison
       if (snapshot !== lastSnapshot && snapshot !== null) {
         lastSnapshot = snapshot;
         paint(snapshot);
@@ -213,7 +219,7 @@ export default function Mix() {
           {Array.from({ length: ROW_COUNT }, (_, i) => (
             <li key={i} className={styles.row} data-filled="false">
               <span className={styles.label} data-cell="label" />
-              {/* 막대는 보조 채널 — 수치는 오른쪽 %가 이미 전달한다 */}
+              {/* The bar is a secondary channel — the % on the right already carries the value */}
               <span className={styles.track} aria-hidden="true">
                 <span className={styles.fill} data-cell="fill" style={{ width: "0%" }} />
               </span>

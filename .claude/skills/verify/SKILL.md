@@ -1,141 +1,144 @@
 ---
 name: verify
-description: Jetstream Deck 변경을 실제 브라우저에서 구동해 검증하는 레시피 (dev 서버 + headless Chromium)
+description: Recipe for verifying Jetstream Deck changes by running them in a real browser (dev server + headless Chromium)
 ---
 
-# Jetstream Deck 검증 레시피
+# Jetstream Deck verification recipe
 
-## 서버
+## Server
 
-- 보통 dev 서버가 이미 `http://localhost:3000`에 떠 있다 (사용자가 띄워둠).
-  `curl -s -o /dev/null -w "%{http_code}" http://localhost:3000`으로 확인 후 그대로 쓸 것 — 죽이지 말 것.
-- 없으면 `pnpm dev` (백그라운드). 3000이 점유돼 있으면 next가 3001을 시도하다가
-  같은 프로젝트의 기존 서버를 감지하고 exit 1 — 이때는 기존 서버를 쓰면 된다.
+- The dev server is usually already up at `http://localhost:3000` (started by the user).
+  Confirm with `curl -s -o /dev/null -w "%{http_code}" http://localhost:3000` and reuse it — do not kill it.
+- If it isn't running, start `pnpm dev` (in the background). If port 3000 is taken, Next
+  tries 3001, then detects an existing server for the same project and exits 1 — in that
+  case just use the existing server.
 
-## 브라우저 드라이브
+## Driving the browser
 
-- Playwright 브라우저 캐시가 있다: `~/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`
-- 프로젝트에 playwright 의존성은 없다. 스크래치패드에 `npm i playwright-core` 후
-  `chromium.launch({ executablePath: <위 경로> })`로 붙는다.
+- A Playwright browser cache exists: `~/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`
+- The project has no Playwright dependency. Run `npm i playwright-core` in the scratchpad,
+  then attach with `chromium.launch({ executablePath: <path above> })`.
 
-## 관찰 지점
+## Observation points
 
-- 연결 배지: `document.querySelector("[data-state]")` → `connecting | live | replaying |
-  reconnecting | failed | closed` (Header). 텍스트는 재시도 중에만 `reconnecting 3`처럼
-  시도 횟수가 붙는다.
-- dev 전용 전역 핸들: `globalThis.__jetstream` = 최신 `StreamSnapshot`
+- Connection badge: `document.querySelector("[data-state]")` → `connecting | live | replaying |
+  reconnecting | failed | closed` (Header). The text only gets an attempt count appended
+  while retrying, e.g. `reconnecting 3`.
+- Dev-only global handle: `globalThis.__jetstream` = the latest `StreamSnapshot`
   (`{ ts, buckets[300], counters: { recvTotal, recvPerSec, procTotal, procPerSec, dropTotal, dropPerSec, parseErrors }, wsState }`) —
-  `lib/jetstream/useStreamWorker.ts`의 dev 블록이 제공. (P1의 1Hz 콘솔 로그는 P2에서 제거됨)
-- HUD(P2, R1에서 플로팅 → 우측 컬럼 하단 고정): `aside[aria-label="diagnostics"]`의
-  `dd` 노드들 — 순서대로
+  provided by the dev block in `lib/jetstream/useStreamWorker.ts`. (The 1 Hz console log from P1 was removed in P2.)
+- HUD (P2; floating in R1 → pinned to the bottom of the right column): the `dd` nodes inside
+  `aside[aria-label="diagnostics"]` — in order:
   recv/s, proc/s, drop/s, **cols 10s**, tokens, tok evict, tok drop, snap(ms), frame p95(ms), ws(=`dd`[9]).
-  (P8에서 `cols 10s`가 인덱스 3에 끼어들어 그 뒤가 한 칸씩 밀렸다.)
-  rAF 루프가 textContent를 직접 갱신하므로 값 변화 관찰은 두 시점 텍스트 비교로 한다.
-  ws 값 노드에는 `data-state`도 붙고, 뒤에 붙는 초는 상태에 따라 다른 것을 가리킨다 —
-  `live/replaying`이면 마지막 이벤트의 지연, `reconnecting/failed`면 다음 시도까지 남은 대기.
-  현재 인스턴스는 별도 행이 아니라 HUD 제목 줄의 `[data-instance]`에 있다(예: `js2.us-east`).
-- 메인 스레드 부하: `PerformanceObserver({ entryTypes: ["longtask"] })`로 롱태스크 카운트 (기대값 0).
-- Surge(P5 → R3/R4 재설계): `globalThis.__jetstream.surge` =
+  (In P8, `cols 10s` was inserted at index 3, shifting everything after it by one.)
+  The rAF loop updates `textContent` directly, so observe value changes by comparing the text at two moments.
+  The ws value node also carries `data-state`, and the seconds appended after it mean different things per state —
+  for `live/replaying` it's the last event's lag; for `reconnecting/failed` it's the wait remaining until the next attempt.
+  The current instance is not a separate row but lives in `[data-instance]` on the HUD title line (e.g. `js2.us-east`).
+- Main-thread load: count long tasks via `PerformanceObserver({ entryTypes: ["longtask"] })` (expected 0).
+- Surge (P5 → redesigned in R3/R4): `globalThis.__jetstream.surge` =
   `{surging[≤10], sustained[≤10], baselineWarmup: {active, elapsedSec}, tuning, lastResortSec}`.
-  각 항목은 `{token, count1m, count5m, count15m, mult, spark[30], rankDelta(null=신규), lifecycle}`.
-  **불변식**: count1m ≤ count5m ≤ count15m, Σspark === count15m, spark 길이 30.
-  `.surgeStats` = `{tracked, cap, active, evicted, dropped, ttlSec}`은 그대로.
-  - **재정렬 주기**: 리스트 순서는 `lastResortSec`이 바뀌는 틱에서만 바뀌어야 한다
-    (기본 5초 간격). 스코어·카운트는 스냅샷마다 갱신된다.
-  - **워밍업**: 세션 첫 120초는 `baselineWarmup.active === true`이고 `surging`이 비어
-    있어야 하며(급상승 탭에 "베이스라인 학습 중" 문구), `sustained`는 정상 동작.
-  - **체류**: 리스트에 들어온 토큰은 30초(tuning.minDwellSec) 안에 사라지면 안 된다
-    (데이터 소멸 제외 — 최초 채움 항목 포함).
-  - **DOM**: `section[aria-label="Surge"]`의 `[role="tab"]` 2개(급상승/지속),
-    `li[data-filled="true"]` 행(`data-token`, `data-life`, style.transform=translateY(순위×40px),
-    transition 400ms — FLIP은 같은 li 노드가 transform만 바꾸는 것으로 확인).
-  - **튜닝 패널(dev)**: "t" 키 토글 → `aside[aria-label="Surge tuner"]`, 입력 7개.
-    콘솔에서는 `__jetstreamDebug.surgeTune({deadbandPct: 0, ...})`. 적용값은
-    스냅샷 `surge.tuning`으로 되돌아온다(세션 한정).
-  - 소크: 지속 유입에서 `tracked`가 `cap`(50k) 아래에서 안정화되고 `evicted`가
-    증가하며 `dropped`는 0에 머무는지 확인 — 상한 안정화의 실측 근거.
+  Each entry is `{token, count1m, count5m, count15m, mult, spark[30], rankDelta(null=new), lifecycle}`.
+  **Invariants**: count1m ≤ count5m ≤ count15m, Σspark === count15m, spark length 30.
+  `.surgeStats` = `{tracked, cap, active, evicted, dropped, ttlSec}` is unchanged.
+  - **Reorder cadence**: list order must change only on the tick where `lastResortSec` changes
+    (default 5-second interval). Scores and counts update every snapshot.
+  - **Warmup**: for the first 120s of a session, `baselineWarmup.active === true` and `surging`
+    must be empty (the Surge tab shows "learning baseline"); `sustained` works normally.
+  - **Dwell**: a token that has entered the list must not disappear within 30s (tuning.minDwellSec)
+    (excluding data expiry — including entries from the initial fill).
+  - **DOM**: `section[aria-label="Surge"]` has two `[role="tab"]` (surging/sustained),
+    `li[data-filled="true"]` rows (`data-token`, `data-life`, style.transform=translateY(rank×40px),
+    transition 400ms — confirm FLIP by the same `li` node only changing its transform).
+  - **Tuner panel (dev)**: "t" key toggle → `aside[aria-label="Surge tuner"]`, 7 inputs.
+    From the console: `__jetstreamDebug.surgeTune({deadbandPct: 0, ...})`. Applied values
+    come back in the snapshot's `surge.tuning` (session-scoped only).
+  - Soak: under sustained inflow, confirm `tracked` stabilizes below `cap` (50k), `evicted`
+    increases, and `dropped` stays at 0 — the empirical evidence that the cap stabilizes.
 
-- Gauges(R2): `globalThis.__jetstream.gauges` = `{sec, stats: {post|like|repost|follow:
-  {partial, ema, p95, avg60}}}`. DOM은 `section[aria-label="Gauges"] [data-type]` 셀 4개 —
-  `[data-cell="fill"]`(transform: scaleY 0..1, 1초 경계에서 80ms 플러시 후 재충전),
-  `[data-cell="value"]`(3초 EMA — 연속 표본 간 점프가 작아야 한다),
-  `[data-cell="delta"]`(`data-dir` up/down/flat, |3%| 미만은 "안정").
-  셀 색(`--type-color`)과 차트 시리즈 색은 `lib/palette.ts` 한 곳에서 와 일치해야 한다.
+- Gauges (R2): `globalThis.__jetstream.gauges` = `{sec, stats: {post|like|repost|follow:
+  {partial, ema, p95, avg60}}}`. The DOM is the four `section[aria-label="Gauges"] [data-type]` cells —
+  `[data-cell="fill"]` (transform: scaleY 0..1; at the 1-second boundary it flushes for 80ms then refills),
+  `[data-cell="value"]` (3-second EMA — jumps between consecutive samples should be small),
+  `[data-cell="delta"]` (`data-dir` up/down/flat; below |3%| is "steady").
+  The cell color (`--type-color`) and the chart series color must match, both sourced from the single `lib/palette.ts`.
 
-- Pulse 차트 개선(R2): 우측 끝 `[class*="edgeLabel"]` 5개(시리즈별 현재값 — 마지막
-  완결 버킷, 시리즈 색). 호버 툴팁은 `.u-over` 위 마우스 이동으로 확인하되
-  **단일 mouse.move는 진입 이벤트를 못 만든다** — `mouse.move(..., {steps: 5})`로
-  움직여야 `[class*="__tooltip"]`이 `hidden=false`가 된다. 값은 시각 + 시리즈 5행.
+- Pulse chart improvements (R2): the five `[class*="edgeLabel"]` at the right edge (each series'
+  current value — the last completed bucket, in the series color). Confirm the hover tooltip by
+  moving the mouse over `.u-over`, but **a single mouse.move does not generate an enter event** —
+  move with `mouse.move(..., {steps: 5})` so `[class*="__tooltip"]` becomes `hidden=false`. The
+  value is a timestamp + 5 series rows.
 
-- Mix(P6): `globalThis.__jetstream.buckets[i].langs`(언어 → post 수) / `.noLangs`.
-  DOM은 `section[aria-label="Mix"]`의 `[data-total]`(60초 표본 수)과
-  `li[data-filled="true"]` 행(`data-lang`, `data-count`). **합계 불변식**: 행들의
-  `data-count` 합 = `data-total` = 최근 60버킷 `langs` 값의 총합 — 셋이 정확히
-  같아야 한다(근사 아님). rAF 페인트가 스냅샷보다 한 프레임 뒤질 수 있으니
-  DOM과 `__jetstream`은 같은 evaluate 안에서 rAF 두 번 넘긴 뒤 읽고, 어긋나면
-  재시도한다.
+- Mix (P6): `globalThis.__jetstream.buckets[i].langs` (language → post count) / `.noLangs`.
+  The DOM is `section[aria-label="Mix"]`'s `[data-total]` (60-second sample count) and
+  `li[data-filled="true"]` rows (`data-lang`, `data-count`). **Sum invariant**: the sum of the
+  rows' `data-count` = `data-total` = the total of the `langs` values over the last 60 buckets — all
+  three must be exactly equal (not approximate). The rAF paint may lag the snapshot by one frame,
+  so read the DOM and `__jetstream` within the same evaluate after passing two rAFs, and retry if they disagree.
 
-- 연결 견고성(P7): `globalThis.__jetstream.conn` =
+- Connection robustness (P7): `globalThis.__jetstream.conn` =
   `{state, instance, attempt, reconnects, failovers, lastEventTimeUs, lagSec, retryInMs}`,
-  `.gaps` = `[{fromSec, toSec, replayed}]`(복구 전이면 `toSec === -1`),
-  `.counters.replaySkipped`(되감기 중복 폐기) / `.replayStale`(링 밖이라 폐기).
-  Pulse의 갭 띠는 DOM 노드가 아니라 uPlot canvas에 직접 그려지므로, 확인은 첫 `canvas`의
-  `getImageData` 픽셀 검사로 한다 — 비어 있는 갭은 danger(붉은) 픽셀, 리플레이로 메워지면
-  accent(푸른)로 바뀐다. 강한 붉은 픽셀(r>100, g<90, b<100)은 갭 마커 말고는 화면에 없다.
+  `.gaps` = `[{fromSec, toSec, replayed}]` (before recovery, `toSec === -1`),
+  `.counters.replaySkipped` (rewind duplicates discarded) / `.replayStale` (discarded as out-of-ring).
+  Pulse's gap band is drawn directly on the uPlot canvas rather than as a DOM node, so verify it via
+  `getImageData` pixel inspection of the first `canvas` — an empty gap is danger (red) pixels, and when
+  backfilled by replay it turns accent (blue). Strong red pixels (r>100, g<90, b<100) appear nowhere on
+  screen other than the gap marker.
 
-- 백프레셔 3단계(P8): `globalThis.__jetstream.backpressure` =
-  `{degraded, m, loadPct, lagMs, costUs, stalling}`(`loadPct`는 **예산 대비** —
-  100%가 진입선이고 `M = ⌈loadPct/100⌉`), `.counters.degradedSkipped`(파싱 전 탈락 누적,
-  `dropTotal`에 합산됨). HUD 루트(`aside[aria-label="diagnostics"]`)에
-  `data-degraded` / `data-m` / `data-paused` / `data-buffered`가 붙고, 배너는
-  `[data-kind="degraded"]` / `[data-kind="paused"]`의 `hidden` 여부로 본다.
-  - **degraded 재현:** `__jetstreamDebug.stall(perFrameUs, durationMs)` — 프레임당 CPU를
-    실제로 태운다. `stall(4000, 15000)`이면 ~3초 뒤 진입(M=2), 주입 종료 +3초쯤 자동 복귀.
-    강하게 보려면 `stall(20000, 12000)`(M≈17, 틱 지연 1.2초→10ms). 진입 판정에 필요한
-    유입이 있어야 하므로 연결이 `live`인 상태에서 호출할 것.
-  - **Pause 재현:** 헤더 `button[data-paused]` 클릭 또는 `__jetstreamDebug.pause(true)`.
-    정지 중 `data-buffered`가 증가하고 `__jetstream.ts`도 계속 갱신되는데(워커는 안 멈춘다)
-    Mix의 `data-total`과 Tape 행 수는 **동결**돼야 한다. 재개 후 3 rAF 안에 Mix `data-total`이
-    최신 스냅샷과 일치하면 "즉시 점프" 확인(실측 ~19ms).
-  - **필터 토글:** 헤더 `button[data-filter]` 또는 `__jetstreamDebug.filter("full")`.
-    `__jetstream.conn.filter`가 `filtered`↔`full`로 바뀐다. **`recv/s`로 검증하지 말 것** —
-    기본 필터가 이미 파이어호스의 ~89%라 +12%뿐이고 요동에 묻힌다(ARCHITECTURE §9).
-    관측점은 HUD의 `cols 10s`(6 → 25~29). 의도된 재연결이라 `gaps`는 비어 있어야 하고,
-    커서 재사용이므로 `replaySkipped`가 늘어난다.
+- Three-stage backpressure (P8): `globalThis.__jetstream.backpressure` =
+  `{degraded, m, loadPct, lagMs, costUs, stalling}` (`loadPct` is **relative to budget** —
+  100% is the entry line and `M = ⌈loadPct/100⌉`), `.counters.degradedSkipped` (cumulative
+  drops before parsing, summed into `dropTotal`). The HUD root (`aside[aria-label="diagnostics"]`)
+  carries `data-degraded` / `data-m` / `data-paused` / `data-buffered`, and the banners are read via
+  the `hidden` state of `[data-kind="degraded"]` / `[data-kind="paused"]`.
+  - **Reproduce degraded:** `__jetstreamDebug.stall(perFrameUs, durationMs)` — actually burns CPU
+    per frame. `stall(4000, 15000)` enters after ~3s (M=2), auto-recovers ~3s after injection ends.
+    For a stronger effect, `stall(20000, 12000)` (M≈17, tick lag 1.2s→10ms). Entry detection requires
+    inflow, so call it while the connection is `live`.
+  - **Reproduce Pause:** click the header `button[data-paused]` or `__jetstreamDebug.pause(true)`.
+    While paused, `data-buffered` increases and `__jetstream.ts` keeps updating (the worker doesn't stop),
+    but Mix's `data-total` and the Tape row count must be **frozen**. After resume, if Mix `data-total`
+    matches the latest snapshot within 3 rAFs, that confirms an "instant jump" (measured ~19ms).
+  - **Filter toggle:** header `button[data-filter]` or `__jetstreamDebug.filter("full")`.
+    `__jetstream.conn.filter` switches `filtered`↔`full`. **Do not verify via `recv/s`** — the default
+    filter already covers ~89% of the firehose, so it's only +12% and gets buried in the noise
+    (ARCHITECTURE §9). The observation point is the HUD's `cols 10s` (6 → 25~29). Since this is an
+    intentional reconnect, `gaps` must be empty, and because the cursor is reused, `replaySkipped` increases.
 
-- 측정 모드(P9): `globalThis.__jetstreamMeasureCtl` — dev 빌드 전용, HUD가 마운트하며 붙인다.
+- Measurement mode (P9): `globalThis.__jetstreamMeasureCtl` — dev-build only, attached by the HUD on mount.
   `start(scenario, meta)` / `stop()` / `status()` / `export()` / `json()` / `reset()`.
-  화면 토글은 **"m" 키**(입력 필드 밖에서만)이고, 켜지면 HUD 머리줄에 `[data-rec]`
-  (`● REC 3w` — 닫힌 창 수)가 뜨며 HUD 루트에 `data-measuring="true"`가 붙는다.
-  - **집계 방식**: HUD의 rAF 루프가 프레임 간격을 매 틱, 스냅샷 실측 카운터를 벽시계
-    초마다 `lib/perf/measurement.ts`의 레코더에 먹인다. 60초마다 창을 닫아
-    `recvPerSec/procPerSec/dropPerSec`의 min·p50·avg·p95·max, `frameMs`의 p50·p95·p99·max·n,
-    `degraded`(초 수·비율·maxM·maxLoadPct·maxLagMs), `caps`(surge tracked/evict/drop 델타,
-    tape stride)를 산출한다. `export()`는 진행 중인 창까지 포함해 돌려준다.
-  - 창 롤오버는 `performance.now()` 기준이라 **CPU 스로틀링에 영향받지 않는다**(60초는 실제 60초).
-  - 프레임 표본은 2s 이상 간격만 제외한다(rAF가 통째로 디스케줄된 구간). 탭 백그라운딩은
-    HUD가 `visibilitychange`에서 리셋해 애초에 표본에 들어오지 않는다.
-  - `export().tuning`은 워커가 **실제 적용 중인** Surge 튜닝값이고, 세션 중 바뀌면
-    `tuningChanged: true`가 된다 — 튜닝 대조 실험의 증거로 쓴다.
+  The on-screen toggle is the **"m" key** (only outside input fields); when on, the HUD header line shows
+  `[data-rec]` (`● REC 3w` — number of closed windows) and the HUD root gets `data-measuring="true"`.
+  - **How it aggregates**: the HUD's rAF loop feeds the frame interval every tick, and the snapshot's
+    measured counters every wall-clock second, into the recorder in `lib/perf/measurement.ts`. Every 60s it
+    closes a window and computes min·p50·avg·p95·max of `recvPerSec/procPerSec/dropPerSec`, p50·p95·p99·max·n
+    of `frameMs`, `degraded` (seconds·ratio·maxM·maxLoadPct·maxLagMs), and `caps` (surge tracked/evict/drop
+    deltas, tape stride). `export()` includes the in-progress window too.
+  - Window rollover is based on `performance.now()`, so it is **unaffected by CPU throttling** (60s is a real 60s).
+  - Frame samples exclude only intervals of 2s or more (spans where rAF was descheduled entirely). Tab backgrounding
+    never enters the samples in the first place because the HUD resets on `visibilitychange`.
+  - `export().tuning` is the Surge tuning value the worker is **actually applying**; if it changes during the
+    session, `tuningChanged: true` is set — used as evidence for the tuning contrast experiment.
 
-- 상태 오버레이(P9, `components/DeckStatus.tsx`): `[role="status"][data-mode]` —
-  `connecting`(최초 연결 전 빈 상태) / `failed`(지속 장애 에러 상태) **두 상태에서만** 뜬다.
-  `reconnecting`은 짧고 패널이 직전 데이터를 얼린 채 배지·HUD가 이미 알리므로 **덮지 않는다**
-  (검증 시 `drop()` 직후 `data-mode`가 `null`인 것이 정상). `pointer-events: none`이라
-  헤더 컨트롤을 가두지 않는다 — 오버레이가 떠 있어도 버튼 클릭이 통과해야 한다.
+- Status overlay (P9, `components/DeckStatus.tsx`): `[role="status"][data-mode]` — appears in
+  **only two states**: `connecting` (empty state before the first connection) / `failed` (error state
+  under a persistent outage). `reconnecting` is brief, and since the panels freeze the prior data while the
+  badge and HUD already signal it, it is **not covered** (during verification, `data-mode` being `null` right
+  after `drop()` is normal). It is `pointer-events: none` so it doesn't trap the header controls — button
+  clicks must pass through even while the overlay is up.
 
-- Tape 상한 관측점(P9): `[data-rows]`(스크롤 영역) = 메인 스레드 테이프 링의 현재 행 수.
-  `TAPE_MAX_ROWS`(2000)에 닿은 뒤 그 값에서 멈추는지가 상한 검증의 직접 증거다.
+- Tape cap observation point (P9): `[data-rows]` (the scroll region) = the current row count of the main-thread
+  tape ring. Whether it stops at `TAPE_MAX_ROWS` (2000) after reaching it is the direct evidence for cap verification.
 
-## 알려진 함정
+## Known pitfalls
 
-- Playwright `context.setOffline(true)`는 이미 열린 WebSocket을 끊지 못한다 —
-  재연결 경로를 라이브로 찌르는 프로브로는 무용. 프레임 유입만 멈춘다(recv/s→0, 배지는 live 유지).
-  **대신 워커 디버그 명령을 쓴다:** `__jetstreamDebug.drop(ms)` — 소켓을 끊고 `ms` 동안
-  재연결 시도까지 실패시켜 백오프·페일오버·되감기 재개를 실제 단절과 같은 경로로 태운다.
-  (`disconnect()` / `connect()`도 같은 핸들에 있다. dev 빌드 전용.)
-- `failed` 상태까지 보려면 단절을 ~95초 이상 유지해야 한다 — 인스턴스 4대를 2회씩
-  돌아 8번째 시도에서야 켜지고, 백오프 합이 대략 1+2+4+8+16+30+30초다.
-- 단절 30초 후 복구 시 되감기 재생은 실시간의 약 10배 속도로 들어온다. 이때 recv/s가
-  치솟고 Surge z가 잠시 튀는 것은 설계된 동작이다(ARCHITECTURE §3 참고).
-- 링버퍼 경계는 워커 가동 300초 이후에만 관찰 가능 — 소크는 최소 ~340초.
+- Playwright `context.setOffline(true)` cannot sever an already-open WebSocket — useless as a probe for
+  poking the reconnection path live. It only stops inbound frames (recv/s→0, badge stays live).
+  **Use the worker debug command instead:** `__jetstreamDebug.drop(ms)` — severs the socket and makes
+  reconnection attempts fail for `ms`, driving backoff/failover/rewind-resume down the same path as a real
+  disconnect. (`disconnect()` / `connect()` are on the same handle. Dev-build only.)
+- To see the `failed` state, you must hold the disconnect for ~95s or more — it only turns on at the 8th
+  attempt after cycling through the four instances twice, and the backoff sum is roughly 1+2+4+8+16+30+30 seconds.
+- On recovery after a 30-second disconnect, the rewind replay arrives at roughly 10× real time. recv/s spiking
+  and Surge z briefly jumping at that point is designed behavior (see ARCHITECTURE §3).
+- The ring-buffer boundary is only observable after 300s of worker uptime — a soak needs at least ~340s.

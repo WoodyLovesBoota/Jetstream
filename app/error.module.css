@@ -1,4 +1,4 @@
-/* 에러 바운더리 폴백 — DeckStatus의 계기판 언어를 따르되 결함(danger) 톤 고정 */
+/* Error boundary fallback — follows DeckStatus's instrument-panel language, but pinned to the fault (danger) tone */
 
 .veil {
   min-height: 100vh;

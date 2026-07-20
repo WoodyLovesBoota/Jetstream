@@ -7,23 +7,24 @@
 }
 
 /*
- * 스루풋 차트 — 전폭 낮은 밴드(약 15vh). 반드시 **정해진 높이**여야 한다:
- * 내부 차트가 height: 100% 체인으로 이 값을 받아 가므로, auto가 되는 순간
- * 차트 높이가 0으로 붕괴한다(좁은 창에서 실측 1px로 재현됐던 회귀).
- * clamp 하한은 축·컨트롤을 빼고도 플롯 영역이 읽히는 최소치다.
+ * Throughput chart — a full-width, short band (roughly 15vh). It must have a
+ * **definite height**: the chart inside inherits this value through a height: 100%
+ * chain, so the moment it becomes auto the chart height collapses to 0 (a regression
+ * reproduced at a measured 1px in narrow windows). The clamp floor is the minimum at
+ * which the plot area is still readable once axes and controls are subtracted.
  */
 .pulse {
   flex: none;
   height: clamp(150px, 16vh, 240px);
 }
 
-/* 낮은 밴드에서는 패널 기본 패딩(14px)이 차트 높이를 다 잡아먹는다 — 몸통만 얇게.
-   Panel의 구조상 몸통은 header 다음의 마지막 div다(클래스는 해시라 구조로 잡는다). */
+/* In a short band the panel's default padding (14px) eats the whole chart height — thin out the body only.
+   Given Panel's structure the body is the last div after the header (classes are hashed, so we target by structure). */
 .pulse > div:last-child {
   padding: 4px 10px 6px;
 }
 
-/* 메인 그리드 — Surge가 주인공(좌 62%), 우 38% 컬럼에 Tape·Mix·HUD */
+/* Main grid — Surge is the lead (62% left), Tape·Mix·HUD in the 38% right column */
 .grid {
   flex: 1;
   min-height: 0;
@@ -42,19 +43,20 @@
   display: flex;
   flex-direction: column;
   gap: var(--gap);
-  /* 세로가 짧은 화면에서는 Mix(185)+HUD(234) 고정 높이가 컬럼을 다 먹어 Tape(flex:1)가
-     0으로 찌부러진다(실측: 776px 높이에서 Tape 33px, scrollArea 0). 그때는 컬럼 안에서만
-     스크롤해 Tape의 최소 높이를 지킨다 — 데크 전체 단일 화면은 그대로 두고 여기서만 흡수. */
+  /* On vertically short screens the fixed heights of Mix (185) + HUD (234) consume the whole
+     column and Tape (flex:1) is crushed to 0 (measured: at 776px height, Tape 33px, scrollArea 0).
+     In that case we scroll inside the column only, preserving Tape's minimum height — the deck as a
+     whole stays a single screen and the overflow is absorbed here. */
   overflow-y: auto;
 }
 
 .tape {
   flex: 1;
-  /* Mix·HUD에 밀려도 이 아래로는 안 줄어든다 — 라이브 테이프가 항상 읽히는 최소치(≈3행) */
+  /* Even when squeezed by Mix·HUD it never shrinks below this — the minimum at which the live tape stays readable (≈3 rows) */
   min-height: 220px;
 }
 
-/* 9행(상위 8 + other) × 행높이 + 크롬이 겹치지 않는 최소치 */
+/* 9 rows (top 8 + other) × row height + the minimum at which the chrome does not overlap */
 .mix {
   flex: none;
   height: 185px;
@@ -66,14 +68,14 @@
     min-height: 100dvh;
   }
 
-  /* .pulse는 전역 clamp 높이를 그대로 쓴다 — auto로 풀면 차트가 0으로 붕괴한다 */
+  /* .pulse keeps the global clamp height as-is — releasing it to auto collapses the chart to 0 */
 
   .grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .surge {
-    /* 10행 × 40px + 탭·컬럼헤드·상태줄 크롬 */
+    /* 10 rows × 40px + tab · column-head · status-line chrome */
     min-height: 560px;
   }
 

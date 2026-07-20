@@ -13,8 +13,9 @@ import {
   type WsState,
 } from "./protocol";
 
-// 워커 생성·통신은 React 밖(모듈 스코프)이 담당한다 — 훅 사용자가 몇이든 워커와
-// WS 연결은 하나뿐이고, 마지막 구독자가 떠나면 정리된다.
+// Creating the worker and talking to it is handled outside React (module scope) — however
+// many hook users there are, there is only one worker and one WS connection, and it is
+// cleaned up when the last subscriber leaves.
 
 type Listener = (snapshot: StreamSnapshot) => void;
 
@@ -22,8 +23,9 @@ let worker: Worker | null = null;
 const listeners = new Set<Listener>();
 
 /**
- * 지금 걸려 있는 컬렉션 필터. 워커가 재생성되면(마지막 구독자가 떠났다 돌아오면)
- * 최초 connect도 이 값으로 나가야 하므로 모듈 스코프에 둔다.
+ * The collection filter currently in place. If the worker is recreated (the last subscriber
+ * left and came back) the initial connect has to go out with this value too, so it lives in
+ * module scope.
  */
 let filterMode: FilterMode = "filtered";
 
@@ -32,8 +34,8 @@ function send(msg: MainToWorker): void {
 }
 
 /**
- * 컬렉션 필터 전환 — "filtered"(feed.* + follow) ↔ "full"(필터 없음).
- * 워커는 커서를 재사용해 재연결하므로 전환 구간이 비지 않는다.
+ * Switch the collection filter — "filtered" (feed.* + follow) ↔ "full" (no filter).
+ * The worker reconnects reusing the cursor, so the switch leaves no hole.
  */
 export function setFilterMode(mode: FilterMode): void {
   if (mode === filterMode) return;
@@ -42,16 +44,16 @@ export function setFilterMode(mode: FilterMode): void {
 }
 
 /**
- * Surge 튜닝 파라미터 부분 교체 — 개발용 튜닝 패널이 부른다. 세션 한정이며
- * 적용된 실제 값은 스냅샷의 surge.tuning으로 확인한다.
+ * Partially replace the Surge tuning parameters — called by the dev tuning panel. It is
+ * session-only, and the values actually applied are read back from the snapshot's surge.tuning.
  */
 export function sendSurgeTune(tuning: Partial<SurgeTuning>): void {
   send({ type: "surgeTune", tuning });
 }
 
 /**
- * React 밖에서 스냅샷 스트림을 직접 구독한다 — HUD처럼 리렌더 없이 rAF로
- * DOM을 갱신하는 소비자용. 반환값은 구독 해제 함수.
+ * Subscribe to the snapshot stream directly from outside React — for consumers like the HUD
+ * that update the DOM on rAF without rerendering. The return value is the unsubscribe function.
  */
 export function subscribeStream(listener: Listener): () => void {
   listeners.add(listener);
@@ -63,7 +65,7 @@ export function subscribeStream(listener: Listener): () => void {
     worker.onmessage = (e: MessageEvent<StreamSnapshot>) => {
       for (const l of listeners) l(e.data);
 
-      // dev 관찰 핸들 — verify 스킬(headless 검증)이 읽는다
+      // dev observation handle — read by the verify skill (headless verification)
       if (process.env.NODE_ENV !== "production") {
         (globalThis as Record<string, unknown>).__jetstream = e.data;
       }
@@ -75,15 +77,17 @@ export function subscribeStream(listener: Listener): () => void {
     });
 
     if (process.env.NODE_ENV !== "production") {
-      // 복구 경로 수동 재현용 — DevTools 오프라인 토글은 이미 열린 WebSocket을
-      // 끊지 못하므로(수신만 멈춘다) 진짜 단절을 만들려면 워커를 직접 찔러야 한다.
-      //   __jetstreamDebug.drop(30000)   → 30초간 연결 불가 상태로 만든다
-      //   __jetstreamDebug.stall()       → 15초간 처리 지연을 주입해 degraded를 켠다
+      // For reproducing the recovery paths by hand — the DevTools offline toggle can't cut
+      // an already-open WebSocket (it only stops delivery), so making a real disconnect
+      // means poking the worker directly.
+      //   __jetstreamDebug.drop(30000)   → makes connecting impossible for 30 seconds
+      //   __jetstreamDebug.stall()       → injects processing delay for 15 seconds to turn degraded on
       (globalThis as Record<string, unknown>).__jetstreamDebug = {
         drop: (blockMs = 30_000) => send({ type: "debug", action: "drop", blockMs }),
-        // 기본값은 프레임당 4ms. 필터 스트림의 실측 유입(수백/초)이면 투영 이용률이
-        // 예산을 몇 배로 넘겨 degraded가 확실히 켜지고, durationMs가 끝나면 비용이
-        // 원래대로 돌아가 자동 복귀까지 한 번에 관찰된다.
+        // The default is 4ms per frame. At the measured inflow of the filtered stream
+        // (hundreds per second) the projected utilization exceeds the budget several times
+        // over, so degraded reliably turns on, and once durationMs elapses the cost returns
+        // to normal so the automatic recovery can be observed in the same pass.
         stall: (perFrameUs = 4_000, durationMs = 15_000) =>
           send({ type: "debug", action: "stall", perFrameUs, durationMs }),
         filter: (mode: FilterMode) => setFilterMode(mode),
@@ -109,14 +113,14 @@ export function subscribeStream(listener: Listener): () => void {
   };
 }
 
-/** 연결 배지가 그리는 데 필요한 저빈도 값만 추린 것 */
+/** Just the low-frequency values the connection badge needs in order to draw */
 export interface ConnView {
   state: WsState;
-  /** 연속 재연결 시도 횟수 (state가 reconnecting/failed일 때만 의미 있다) */
+  /** Consecutive reconnect attempts (only meaningful when state is reconnecting/failed) */
   attempt: number;
-  /** 현재 인스턴스 축약 라벨 — 예: js2.us-east */
+  /** Abbreviated label of the current instance — e.g. js2.us-east */
   instance: string;
-  /** 지금 소켓에 실제로 걸려 있는 필터 — 버튼 라벨의 근거는 낙관적 상태가 아니라 이 값이다 */
+  /** The filter actually in place on the socket right now — the button label is based on this value, not on optimistic state */
   filter: FilterMode;
 }
 
@@ -137,9 +141,10 @@ export function useStreamWorker(): {
   useEffect(() => {
     let last: ConnView = INITIAL_CONN;
     return subscribeStream((snapshot) => {
-      // 스냅샷은 ref 교체만 — 데이터 경로에서 React 리렌더 금지
+      // Snapshots only swap the ref — no React rerenders on the data path
       snapshotRef.current = snapshot;
-      // 저빈도 UI 상태(연결 배지)만, 값이 실제로 바뀔 때만 React로 올린다
+      // Only the low-frequency UI state (the connection badge) goes into React, and only
+      // when the value actually changes
       const c = snapshot.conn;
       if (
         c.state !== last.state ||

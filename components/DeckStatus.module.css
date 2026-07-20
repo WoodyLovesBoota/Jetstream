@@ -1,7 +1,8 @@
 /*
- * 앰비언트 상태 레이어. 데크 위를 덮되 클릭은 통과시킨다(pointer-events: none) —
- * 상태를 알리는 스킨이지 사용자를 가두는 모달이 아니다. 중앙은 진하게, 가장자리는
- * 옅게 스크림을 깔아 헤더 배지·컨트롤이 그 아래로 계속 읽히게 한다.
+ * Ambient status layer. It covers the deck but lets clicks pass through
+ * (pointer-events: none) — it is a skin that reports status, not a modal that traps the
+ * user. The scrim is laid down dense at the center and light at the edges so the header
+ * badges and controls stay readable underneath.
  */
 .veil {
   position: fixed;
@@ -30,7 +31,7 @@
   }
 }
 
-/* 계기판 명판과 같은 시그니처 — 코너 틱(좌상·우하) */
+/* Same signature as the instrument-panel nameplate — corner ticks (top-left · bottom-right) */
 .card {
   position: relative;
   min-width: min(340px, 82vw);
@@ -71,7 +72,7 @@
   border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
 }
 
-/* ── 상태 글리프: 스코프 링 ── */
+/* ── Status glyph: scope ring ── */
 .glyph {
   position: relative;
   width: 46px;
@@ -95,7 +96,7 @@
   background: var(--accent);
 }
 
-/* connecting: 링이 숨을 쉬고, 스코프 스윕이 한 바퀴 돈다 */
+/* connecting: the ring breathes and the scope sweep makes a full turn */
 .glyph[data-mode="connecting"] .ring {
   animation: ringBreathe 1.8s ease-in-out infinite;
 }
@@ -107,7 +108,7 @@
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  /* 원뿔형 스윕 — 오실로스코프 잔광 */
+  /* Conic sweep — oscilloscope afterglow */
   background: conic-gradient(
     from 0deg,
     color-mix(in srgb, var(--accent) 42%, transparent),
@@ -118,7 +119,7 @@
   animation: sweepSpin 2.2s linear infinite;
 }
 
-/* failed: 링·코어를 danger로, 코어가 경고하듯 느리게 맥동 */
+/* failed: ring and core go danger, and the core pulses slowly as a warning */
 .glyph[data-mode="failed"] .ring {
   border-color: color-mix(in srgb, var(--danger) 60%, transparent);
 }
@@ -163,7 +164,7 @@
   }
 }
 
-/* ── 텍스트 ── */
+/* ── Text ── */
 .label {
   margin: 0;
   font-family: var(--font-mono), var(--font-kr), monospace;

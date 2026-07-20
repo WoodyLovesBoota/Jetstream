@@ -10,21 +10,23 @@ import { setText } from "@/lib/dom";
 import { TYPE_COLORS, withAlpha } from "@/lib/palette";
 import styles from "./Pulse.module.css";
 
-// Pulse는 React를 차트 컨테이너 마운트에만 쓴다. uPlot 인스턴스는 1회 생성 후
-// rAF 틱마다 setData로만 갱신한다 — 데이터 경로에서 리렌더 금지 원칙(설계 §1.3).
+// Pulse uses React only to mount the chart container. The uPlot instance is
+// created once and then updated on each rAF tick via setData alone — the
+// no-rerenders-on-the-data-path principle (design §1.3).
 
 const WINDOW_OPTIONS = [60, 300] as const;
 type WindowSec = (typeof WINDOW_OPTIONS)[number];
 
 interface SeriesDef {
   label: string;
-  /** null인 시리즈는 나머지 넷 이외의 모든 collection을 합산한 잔여값("기타") */
+  /** A null series is the remainder ("other") summing every collection outside the other four */
   collection: string | null;
   color: string;
 }
 
-// 시리즈 색은 게이지 셀과 같은 팔레트 상수(lib/palette.ts)에서 온다 —
-// 타입 ↔ 색 대응이 게이지·차트 어디서나 동일해야 한다.
+// Series colors come from the same palette constants as the gauge cells
+// (lib/palette.ts) — the type ↔ color mapping must be identical across the
+// gauges and the chart.
 const SERIES: SeriesDef[] = [
   { label: "post", collection: "app.bsky.feed.post", color: TYPE_COLORS.post },
   { label: "like", collection: "app.bsky.feed.like", color: TYPE_COLORS.like },
@@ -33,16 +35,16 @@ const SERIES: SeriesDef[] = [
   { label: "other", collection: null, color: TYPE_COLORS.other },
 ];
 
-// canvas는 CSS 커스텀 프로퍼티를 해석 못 한다 — app/globals.css 토큰값을 그대로 옮김
+// canvas cannot resolve CSS custom properties — the app/globals.css token values are copied verbatim
 const AXIS_STROKE = "#72869b"; // --muted
 const GRID_STROKE = "#1c2836"; // --line
-const GAP_STROKE = "#e5484d"; // --danger — 아직 비어 있는 단절 구간
-const REPLAY_STROKE = "#4ba3ff"; // --accent — 되감기가 메운 구간
+const GAP_STROKE = "#e5484d"; // --danger — a disconnect span that is still empty
+const REPLAY_STROKE = "#4ba3ff"; // --accent — a span the rewind filled in
 
-/** 우측 끝 현재값 라벨 사이에 확보하는 최소 세로 간격(px) */
+/** Minimum vertical spacing (px) kept between the current-value labels at the right edge */
 const EDGE_LABEL_GAP = 12;
 
-/** 버킷 슬라이스 → uPlot 누적(stacked) 시리즈. 한 번의 순회로 계산한다. */
+/** Bucket slice → uPlot stacked series. Computed in a single pass. */
 function buildStackedData(buckets: SecondBucket[], windowSec: WindowSec): uPlot.AlignedData {
   const slice = buckets.slice(-windowSec);
   const n = slice.length;
@@ -69,7 +71,7 @@ function buildStackedData(buckets: SecondBucket[], windowSec: WindowSec): uPlot.
   return [x, ...cum] as uPlot.AlignedData;
 }
 
-/** 누적 데이터에서 시리즈 s(0-기준)의 비누적 값과 밴드 경계를 꺼낸다 */
+/** Pulls the non-cumulative value and band bounds for series s (0-based) out of the cumulative data */
 function seriesValueAt(
   data: uPlot.AlignedData,
   s: number,
@@ -81,9 +83,11 @@ function seriesValueAt(
 }
 
 /**
- * 우측 끝 시리즈별 현재값 라벨. 마지막 칸은 진행 중인 부분 버킷이라 매초 0으로
- * 떨어진다 — 그 앞(마지막 완결 버킷)의 값을 라벨로 쓴다. 위치는 해당 시리즈
- * 밴드의 세로 중점이고, 겹치면 최소 간격을 확보하도록 밀어낸다.
+ * The per-series current-value labels at the right edge. The final slot is the
+ * in-progress partial bucket and so drops to 0 every second — the label uses
+ * the value before it (the last completed bucket) instead. The position is the
+ * vertical midpoint of that series' band, and overlaps are pushed apart to keep
+ * the minimum spacing.
  */
 function updateEdgeLabels(u: uPlot, els: HTMLElement[]): void {
   const data = u.data;
@@ -100,8 +104,9 @@ function updateEdgeLabels(u: uPlot, els: HTMLElement[]): void {
     return { el, v, y: u.valToPos((cum + prev) / 2, "y") };
   });
 
-  // 겹침 방지 — 위→아래로 최소 간격을 벌리고, 아래로 넘친 만큼 위로 되민다.
-  // 플롯이 라벨 수 × 간격보다 낮으면 간격을 줄여서라도 플롯 안에 가둔다.
+  // Overlap avoidance — open up the minimum spacing top→bottom, then push back
+  // up by however much overflowed off the bottom. If the plot is shorter than
+  // label count × spacing, shrink the spacing to keep them inside the plot.
   const h = u.over.clientHeight;
   const gap = Math.min(EDGE_LABEL_GAP, Math.max(8, Math.floor((h - 8) / (els.length - 1))));
   const sorted = [...entries].sort((a, b) => a.y - b.y);
@@ -123,7 +128,7 @@ function updateEdgeLabels(u: uPlot, els: HTMLElement[]): void {
   }
 }
 
-// ── 호버 툴팁 — uPlot 내장 커서(idx)에 얹는 오버레이 ────────────────
+// ── hover tooltip — an overlay riding on uPlot's built-in cursor (idx) ────────────────
 
 interface TooltipEls {
   root: HTMLDivElement;
@@ -184,7 +189,7 @@ function updateTooltip(u: uPlot, tip: TooltipEls): void {
     setText(tip.values[s], String(seriesValueAt(u.data, s, idx).v));
   }
 
-  // 커서 우측 12px에 붙이되 우단에서는 좌측으로 플립 — offsetWidth 읽기는 호버 중에만
+  // Pin it 12px to the right of the cursor, flipping to the left at the right edge — offsetWidth is only read while hovering
   const w = tip.root.offsetWidth;
   const h = tip.root.offsetHeight;
   const x = left + 12 + w > u.over.clientWidth ? left - 12 - w : left + 12;
@@ -193,9 +198,10 @@ function updateTooltip(u: uPlot, tip: TooltipEls): void {
 }
 
 /**
- * 단절 구간을 차트 위에 띠로 얹는다. 아직 비어 있는 갭은 danger, 되감기 재생이
- * 데이터를 채워 넣은 구간은 accent — "손실"과 "복구됨"이 눈으로 구분돼야 한다.
- * 복구 전(toSec === -1)인 갭은 오른쪽 끝(현재)까지 열린 채로 자란다.
+ * Lays the disconnect spans over the chart as bands. A gap that is still empty
+ * is danger; a span the rewind replay filled with data is accent — "lost" and
+ * "recovered" have to be distinguishable at a glance.
+ * A gap not yet recovered (toSec === -1) grows open-ended to the right edge (now).
  */
 function drawGaps(u: uPlot, gaps: GapMarker[], fontFamily: string): void {
   if (gaps.length === 0) return;
@@ -222,7 +228,7 @@ function drawGaps(u: uPlot, gaps: GapMarker[], fontFamily: string): void {
     ctx.fillStyle = withAlpha(color, 0.1);
     ctx.fillRect(left, u.bbox.top, Math.max(1, right - left), u.bbox.height);
 
-    // 구간 양끝의 이음매(seam) — 어디서 끊기고 어디서 이어졌는지
+    // The seams at both ends of the span — where it broke and where it resumed
     ctx.setLineDash([3, 3]);
     ctx.strokeStyle = withAlpha(color, 0.65);
     ctx.lineWidth = 1;
@@ -261,14 +267,14 @@ function buildOpts(
       label: def.label,
       stroke: def.color,
       width: 2,
-      // 맨 아래 시리즈(post)만 0까지 직접 채우고, 그 위는 전부 band가 채운다
+      // Only the bottom series (post) fills down to 0 itself; everything above it is filled by bands
       fill: i === 0 ? withAlpha(def.color, 0.1) : undefined,
       points: { show: false as const },
     })),
   ];
 
-  // 스택 밴드: idx번째 누적선과 idx-1번째 누적선 사이를 idx 색으로 채운다
-  // (uPlot bands: series[0]=위쪽 경계="from", series[1]=아래쪽 경계="to")
+  // Stack bands: fill between the idx-th cumulative line and the (idx-1)-th with idx's color
+  // (uPlot bands: series[0]=upper bound="from", series[1]=lower bound="to")
   const bands: uPlot.Band[] = [];
   for (let idx = 2; idx <= SERIES.length; idx++) {
     bands.push({ series: [idx, idx - 1], fill: withAlpha(SERIES[idx - 1].color, 0.1) });
@@ -280,8 +286,8 @@ function buildOpts(
     series,
     bands,
     legend: { show: false },
-    // 갭 띠는 시리즈를 다 그린 뒤 위에 얹는다 — 낮은 알파라 아래 면적을 가리지 않는다
-    // 툴팁은 uPlot 내장 커서(크로스헤어·idx 스냅)의 setCursor 훅에 얹는다
+    // The gap bands go on top after all series are drawn — their low alpha keeps the areas below visible
+    // The tooltip rides on the setCursor hook of uPlot's built-in cursor (crosshair, idx snapping)
     hooks: {
       draw: [(u) => drawGaps(u, getGaps(), fontFamily)],
       setCursor: [onCursor],
@@ -290,7 +296,7 @@ function buildOpts(
       x: { time: true },
       y: { range: (_u, _min, max) => [0, max <= 0 ? 1 : max * 1.1] },
     },
-    // 낮은 밴드라 축은 최대한 얇게 — 단위(events/sec)는 패널 note가 이미 말한다
+    // A short band, so keep the axes as thin as possible — the unit (events/sec) is already stated by the panel note
     axes: [
       {
         stroke: AXIS_STROKE,
@@ -321,13 +327,13 @@ export default function Pulse() {
     const wrap = wrapRef.current;
     if (wrap === null) return;
 
-    // canvas는 CSS 변수를 못 읽으므로 실측한 --font-mono 값을 그대로 넘긴다
+    // canvas cannot read CSS variables, so pass the measured --font-mono value through as is
     const fontFamily = getComputedStyle(wrap).getPropertyValue("--font-mono").trim() || "monospace";
     const rect = wrap.getBoundingClientRect();
-    // draw 훅은 최신 갭 목록을 그때그때 읽어야 한다 — 스냅샷마다 opts를 새로
-    // 만들 수는 없으므로 이펙트 스코프의 변수를 게터로 넘긴다
+    // The draw hook has to read the latest gap list as it goes — opts cannot be
+    // rebuilt per snapshot, so an effect-scoped variable is passed via a getter
     let gaps: GapMarker[] = [];
-    // 툴팁 DOM은 plot 생성 뒤에 만들어지므로 훅에는 게터 경유로 넘긴다
+    // The tooltip DOM is created after the plot, so it reaches the hook via a getter
     let tooltip: TooltipEls | null = null;
     const plot = new uPlot(
       buildOpts(
@@ -343,7 +349,7 @@ export default function Pulse() {
       wrap,
     );
 
-    // 우측 끝 현재값 라벨 — 시리즈당 하나, plot 오버레이(over)에 직접 얹는다
+    // The right-edge current-value labels — one per series, laid directly on the plot overlay (over)
     const edgeEls = SERIES.map((def) => {
       const el = document.createElement("div");
       el.className = styles.edgeLabel;
@@ -371,16 +377,18 @@ export default function Pulse() {
     let lastSnapshot: StreamSnapshot | null = null;
     let lastWindow: WindowSec = windowRef.current;
     let raf = requestAnimationFrame(function tick() {
-      // Pause 중에는 setData를 건너뛴다. 구독은 계속 돌아 snapshot/gaps가 최신으로
-      // 덮이므로, 재개하면 참조 비교가 바로 걸려 밀린 프레임을 따라 그리는 일 없이
-      // 최신 한 장으로 점프한다.
+      // While paused, skip setData. The subscription keeps running and
+      // snapshot/gaps keep being overwritten with the latest, so on resume the
+      // reference comparison trips immediately and it jumps to a single latest
+      // frame without painting the backlog.
       if (isRenderPaused()) {
         raf = requestAnimationFrame(tick);
         return;
       }
 
-      // 매 프레임 최신 스냅샷/윈도를 확인하되, 실제로 바뀐 경우에만 setData —
-      // 스냅샷은 10Hz로만 갱신되므로 나머지 프레임은 참조 비교 한 번으로 끝난다
+      // Check the latest snapshot/window every frame, but call setData only when
+      // something actually changed — snapshots only update at 10Hz, so every
+      // other frame ends at a single reference comparison
       if (snapshot !== lastSnapshot || windowRef.current !== lastWindow) {
         lastSnapshot = snapshot;
         lastWindow = windowRef.current;
@@ -410,7 +418,7 @@ export default function Pulse() {
               {def.label}
             </li>
           ))}
-          {/* 단절 마커 범례 — 띠가 나타났을 때 무슨 뜻인지 화면 안에서 읽히도록 */}
+          {/* Disconnect marker legend — so that when a band appears, its meaning is readable on screen */}
           {[
             { label: "gap", color: GAP_STROKE },
             { label: "replay", color: REPLAY_STROKE },
@@ -424,7 +432,7 @@ export default function Pulse() {
             </li>
           ))}
         </ul>
-        <div className={styles.windowToggle} role="group" aria-label="시간 범위">
+        <div className={styles.windowToggle} role="group" aria-label="time range">
           {WINDOW_OPTIONS.map((w) => (
             <button
               key={w}
