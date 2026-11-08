@@ -85,13 +85,18 @@ function rank(counts: Map<string, number>, total: number): Slice[] {
 export default function Mix() {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
-  const statusRef = useRef<HTMLSpanElement | null>(null);
+  const totalRef = useRef<HTMLSpanElement | null>(null);
+  const langsRef = useRef<HTMLSpanElement | null>(null);
+  const noLangRef = useRef<HTMLSpanElement | null>(null);
 
   useEffect(() => {
     const root = rootRef.current;
     const list = listRef.current;
-    const statusEl = statusRef.current;
-    if (root === null || list === null || statusEl === null) return;
+    const totalEl = totalRef.current;
+    const langsEl = langsRef.current;
+    const noLangEl = noLangRef.current;
+    if (root === null || list === null || totalEl === null || langsEl === null || noLangEl === null)
+      return;
 
     const rows: RowEls[] = [];
     for (const li of list.querySelectorAll<HTMLLIElement>("li")) {
@@ -133,12 +138,9 @@ export default function Mix() {
       const empty = total === 0;
       if (root!.dataset.empty !== String(empty)) root!.dataset.empty = String(empty);
 
-      setText(
-        statusEl!,
-        `n ${total.toLocaleString("en-US")}` +
-          ` · ${counts.size.toLocaleString("en-US")} langs` +
-          ` · nolang ${noLangs.toLocaleString("en-US")}`,
-      );
+      setText(totalEl!, `게시물 ${total.toLocaleString("en-US")}건`);
+      setText(langsEl!, `${counts.size.toLocaleString("en-US")}개 언어`);
+      setText(noLangEl!, `언어 표기 없음 ${noLangs.toLocaleString("en-US")}건`);
       // 표본 수를 DOM에도 실어둔다 — 막대 합계와의 일치를 밖에서 검산할 수 있게
       setAttr(root!, "data-total", String(total));
 
@@ -161,7 +163,7 @@ export default function Mix() {
         row.root.dataset.filled = "true";
         row.root.dataset.lang = slice.lang;
         setAttr(row.root, "data-count", String(slice.count));
-        setText(row.label, slice.lang);
+        setText(row.label, slice.lang === "other" ? "기타" : slice.lang);
         setText(row.pct, formatPct(slice.count, total));
 
         // 막대 길이 = 전체 표본 대비 점유율. %와 같은 수를 말한다.
@@ -203,11 +205,11 @@ export default function Mix() {
 
   return (
     <div className={styles.root} ref={rootRef} data-empty="true" data-total="0">
-      <div className={styles.statusBar}>
-        <span ref={statusRef} className={styles.status}>
-          n 0 · 0 langs · nolang 0
-        </span>
-      </div>
+      <p className={styles.status}>
+        <span ref={totalRef}>게시물 0건</span>
+        <span ref={langsRef}>0개 언어</span>
+        <span ref={noLangRef}>언어 표기 없음 0건</span>
+      </p>
       <div className={styles.listWrap}>
         <ul className={styles.list} ref={listRef}>
           {Array.from({ length: ROW_COUNT }, (_, i) => (
@@ -221,7 +223,7 @@ export default function Mix() {
             </li>
           ))}
         </ul>
-        <p className={styles.empty}>awaiting posts…</p>
+        <p className={styles.empty}>게시물을 기다리는 중</p>
       </div>
     </div>
   );

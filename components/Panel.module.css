@@ -1,40 +1,67 @@
-/* 시안 시그니처: 부드러운 12px 라운드 카드. 코너 틱 대신 라운드 + 얇은 라인으로
-   패널을 가른다. */
+/*
+ * 패널 = 기록지 한 장 위의 구획. 카드가 아니다 — 배경·그림자·라운드 없이
+ * 페이지 그리드가 그어주는 괘선(page.module.css)으로만 갈린다.
+ */
 .panel {
   position: relative;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
 }
 
 .head {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
-  gap: var(--gap);
-  padding: 16px var(--pad) 10px;
+  gap: 12px;
+  padding: 14px var(--pad) 10px;
+}
+
+.titles {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
 }
 
 .name {
   margin: 0;
-  font-family: var(--font-sans), var(--font-kr), sans-serif;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: #c9d4e0;
+  font-size: 15px;
+  font-weight: 650;
+  font-stretch: 112%;
+  letter-spacing: -0.005em;
+  line-height: 1.2;
+  color: var(--ink);
 }
 
 .note {
-  font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 12px;
-  color: var(--faint);
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.2;
+  color: var(--ink-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 리드아웃이 붙는 패널은 제목을 세로로 쌓고 남은 폭을 계기에 내준다 */
+.head[data-readouts="true"] {
+  align-items: stretch;
+  gap: 32px;
+  padding-bottom: 6px;
+}
+
+.head[data-readouts="true"] .titles {
+  flex: none;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 4px;
+  width: 132px;
+}
+
+.head[data-readouts="true"] .note {
+  white-space: normal;
+  line-height: 1.35;
 }
 
 .body {
@@ -43,14 +70,25 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 var(--pad) var(--pad);
+  padding: 0 var(--pad) 16px;
 }
 
 .empty {
   margin: 0;
-  font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--faint);
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+@media (max-width: 767.98px) {
+  .head[data-readouts="true"] {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .head[data-readouts="true"] .titles {
+    width: auto;
+    flex-direction: row;
+    align-items: baseline;
+    gap: 10px;
+  }
 }

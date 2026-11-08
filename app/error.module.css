@@ -1,55 +1,53 @@
-/* 에러 바운더리 폴백 — DeckStatus의 계기판 언어를 따르되 결함(danger) 톤 고정 */
+/* 에러 바운더리 폴백 — DeckStatus의 명판 언어를 따르되 결함(danger) 톤 고정 */
 
 .veil {
   min-height: 100vh;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: 24px 16px;
 }
 
 .card {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 28px 36px;
-  background: var(--surface);
-  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
-  text-align: center;
+  align-items: flex-start;
+  gap: 8px;
+  width: min(420px, 100%);
+  padding: 26px 28px 24px;
+  background: var(--paper);
+  border: 1px solid var(--danger);
+  border-radius: 4px;
 }
 
 .label {
   margin: 0;
-  font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 13px;
-  letter-spacing: 0.32em;
-  text-transform: uppercase;
+  font-size: 18px;
+  font-weight: 650;
+  font-stretch: 112%;
   color: var(--danger);
 }
 
 .detail {
   margin: 0;
-  max-width: 48ch;
-  font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 11px;
-  color: var(--muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  color: var(--ink-2);
   overflow-wrap: anywhere;
 }
 
 .btn {
-  margin-top: 6px;
-  padding: 4px 12px;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  color: var(--muted);
-  font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  margin-top: 8px;
+  padding: 7px 14px;
+  background: var(--ink);
+  border: 1px solid var(--ink);
+  border-radius: var(--radius-sm);
+  color: var(--paper);
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
 }
 
 .btn:hover {
-  color: var(--text);
-  border-color: var(--tick);
+  background: var(--ink-2);
+  border-color: var(--ink-2);
 }

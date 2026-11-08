@@ -1,42 +1,42 @@
 .root {
   display: flex;
   flex-direction: column;
-  gap: 6px;
   width: 100%;
   height: 100%;
   min-width: 0;
   min-height: 0;
 }
 
-/* ── 탭 ─────────────────────────────────────────────────────────── */
+/* ── 탭 — 글자 탭 + 잉크 밑줄. 버튼 더미가 아니라 목록의 두 관점이다 ─────── */
 
 .tabs {
   display: flex;
   flex: none;
-  gap: 8px;
+  gap: 22px;
+  border-bottom: 1px solid var(--rule);
 }
 
 .tab {
-  border: 1px solid var(--line);
-  border-radius: 7px;
+  position: relative;
+  margin-bottom: -1px;
+  border: none;
+  border-bottom: 2px solid transparent;
   background: transparent;
-  padding: 8px 16px;
-  font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  color: var(--faint);
+  padding: 6px 0 9px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-3);
   cursor: pointer;
 }
 
 .tab:hover {
-  border-color: var(--tick);
-  color: var(--text);
+  color: var(--ink);
 }
 
 .tab[aria-selected="true"] {
-  border-color: #24354a;
-  color: #8fc0ff;
-  background: #15202e;
+  border-bottom-color: var(--ink);
+  font-weight: 600;
+  color: var(--ink);
 }
 
 /* ── 리스트 ──────────────────────────────────────────────────────── */
@@ -47,7 +47,6 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--line);
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -56,14 +55,10 @@
   display: flex;
   flex: none;
   align-items: baseline;
-  gap: 10px;
-  padding: 8px 2px;
-  border-bottom: 1px solid var(--line);
-  font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--faint);
+  gap: 12px;
+  padding: 10px 4px 6px;
+  font-size: 12px;
+  color: var(--ink-3);
 }
 
 .list {
@@ -83,6 +78,7 @@
  * FLIP: 행은 절대 배치 + translateY로만 움직인다(리플로우 없음). 순위 변경은
  * 워커의 5초 재정렬 때만 오므로 400ms 전환이 그때 한 번 부드럽게 흐른다.
  * 신규 바인딩·탭 전환은 data-instant로 전환을 끄고 제자리에 즉시 놓는다.
+ * 높이 40px은 Surge.tsx의 ROW_H와 맞물린 값.
  */
 .row {
   position: absolute;
@@ -90,15 +86,14 @@
   left: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
   height: 40px;
-  padding: 0 2px;
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
-  font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 13px;
+  padding: 0 4px;
+  border-top: 1px solid var(--grid);
+  font-size: 14px;
   white-space: nowrap;
-  transition: transform 400ms ease;
+  transition: transform 400ms cubic-bezier(0.2, 0.7, 0.2, 1);
   will-change: transform;
 }
 
@@ -115,20 +110,26 @@
 
 .rank {
   flex: none;
-  width: 2ch;
+  width: 22px;
   text-align: right;
-  font-variant-numeric: tabular-nums;
-  color: var(--faint);
+  font-stretch: 75%;
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--ink-3);
+}
+
+.colHead .rank {
+  font-size: 12px;
+  font-stretch: 100%;
 }
 
 /* 순위 변동 ▲n/▼n/– */
 .delta {
   flex: none;
-  width: 3ch;
+  width: 32px;
   text-align: center;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  color: var(--faint);
+  font-size: 12px;
+  color: var(--ink-3);
 }
 
 .delta[data-dir="up"] {
@@ -144,8 +145,16 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 15px;
-  color: var(--text);
+  font-size: 16px;
+  font-weight: 550;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+}
+
+.colHead .token {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-3);
 }
 
 .sparkCol {
@@ -154,81 +163,107 @@
   height: 20px;
 }
 
+.colHead .sparkCol {
+  height: auto;
+}
+
 .c5 {
   flex: none;
-  width: 5ch;
+  width: 44px;
   text-align: right;
-  font-variant-numeric: tabular-nums;
-  color: var(--muted);
+  color: var(--ink-2);
 }
 
+/* 버스트 배수 — 이 패널이 말하려는 단 하나의 숫자 */
 .mult {
   flex: none;
-  width: 6ch;
+  width: 64px;
   text-align: right;
-  font-variant-numeric: tabular-nums;
-  /* 버스트 배수는 시안대로 핑크로 통일 — 급등 여부는 옆의 상태 칩이 말한다 */
-  color: var(--repost);
+  font-size: 16px;
+  font-weight: 650;
+  font-stretch: 85%;
+  color: var(--ink);
 }
 
-/* ── 라이프사이클 칩 — 신규·급등만 유채색, 유지·하강은 저채도 ── */
+.colHead .mult {
+  font-size: 12px;
+  font-weight: 400;
+  font-stretch: 100%;
+  color: var(--ink-3);
+}
+
+/* ── 라이프사이클 — 테두리 칩 없이 글자색만. 신규·급등만 유채색 ── */
 
 .chipCol {
   flex: none;
-  width: 58px;
+  width: 40px;
   display: flex;
   justify-content: flex-end;
 }
 
 .chip {
-  display: inline-block;
-  padding: 4px 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  font-size: 11px;
-  line-height: 1.3;
-  color: var(--faint);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-3);
 }
 
 .row[data-life="new"] .chip {
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--accent);
+  font-weight: 600;
 }
 
 .row[data-life="rising"] .chip {
-  border-color: color-mix(in srgb, var(--warn) 55%, transparent);
-  background: color-mix(in srgb, var(--warn) 12%, transparent);
-  color: var(--warn);
+  color: var(--danger);
+  font-weight: 600;
 }
 
 .row[data-life="steady"] .chip {
-  color: var(--muted);
-}
-
-.row[data-life="falling"] .chip {
-  color: var(--faint);
+  color: var(--ink-2);
 }
 
 /* ── 워밍업·빈 상태 ──────────────────────────────────────────────── */
 
-/* 급상승 탭 워밍업: 리스트 대신 학습 경과 한 줄 */
+/* 급상승 탭 워밍업: 리스트 대신 학습 경과와 이유 */
 .warmup {
   display: none;
   position: absolute;
   top: 50%;
   left: 50%;
+  width: min(380px, 86%);
   transform: translate(-50%, -50%);
-  margin: 0;
-  font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  color: var(--warn);
-  white-space: nowrap;
 }
 
 .listWrap[data-warmup="true"] .warmup {
   display: block;
+}
+
+.warmupTitle {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.warmupTrack {
+  display: block;
+  height: 3px;
+  background: var(--paper-2);
+  overflow: hidden;
+}
+
+.warmupBar {
+  display: block;
+  height: 100%;
+  background: var(--ink);
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+.warmupNote {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-2);
 }
 
 .empty {
@@ -237,11 +272,9 @@
   left: 50%;
   transform: translate(-50%, -50%);
   margin: 0;
-  font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--faint);
+  font-size: 13px;
+  color: var(--ink-3);
+  white-space: nowrap;
 }
 
 .listWrap[data-empty="false"] .empty,
@@ -252,20 +285,20 @@
 /* ── 하단 상태줄 — 값은 전부 워커 실측/실설정값 ─────────────────── */
 
 .statusBar {
-  display: flex;
   flex: none;
-  align-items: baseline;
-  border-top: 1px solid var(--line);
-  padding-top: 12px;
-  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  margin: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+  font-size: 12px;
+  color: var(--ink-3);
 }
 
-.status {
-  font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  color: var(--faint);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+@media (max-width: 559.98px) {
+  .sparkCol,
+  .delta {
+    display: none;
+  }
 }

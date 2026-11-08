@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   SURGE_LIST_N,
+  SURGE_WARMUP_SEC,
   type StreamSnapshot,
   type SurgeItem,
   type SurgeLifecycle,
@@ -10,6 +11,7 @@ import {
 import { isRenderPaused } from "@/lib/jetstream/renderGate";
 import { subscribeStream } from "@/lib/jetstream/useStreamWorker";
 import { setData, setText } from "@/lib/dom";
+import { SHEET } from "@/lib/palette";
 import styles from "./Surge.module.css";
 
 // Surge — 트렌드 랭킹의 주인공 패널. React는 탭 버튼(저빈도 컨트롤)과 고정
@@ -32,9 +34,13 @@ const SPARK_H = 20;
 /** 신규 진입 하이라이트가 감쇠하는 시간 */
 const HIGHLIGHT_MS = 30_000;
 
-// canvas는 CSS 변수를 못 읽는다 — globals.css 토큰값을 그대로 옮김
-const SPARK_ACCENT = "#4a9eff"; // --accent, 급등 상태
-const SPARK_NEUTRAL = "#5c6b7a"; // --faint, 그 외
+// canvas는 CSS 변수를 못 읽는다 — lib/palette.ts의 SHEET(= globals.css 토큰)
+const SPARK_ACCENT = SHEET.ink; // 급등 상태 — 진한 잉크(빨강은 상태 글자 하나로 충분하다)
+const SPARK_NEUTRAL = SHEET.ink3; // 그 외
+
+/** 신규 진입 하이라이트 색(post 잉크) — 알파만 시간에 따라 줄인다 */
+const HIGHLIGHT_RGB = "33, 82, 196";
+const HIGHLIGHT_ALPHA = 0.1;
 
 const LIFE_LABEL: Record<SurgeLifecycle, string> = {
   new: "신규",
@@ -109,14 +115,29 @@ export default function Surge() {
   const listRef = useRef<HTMLOListElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const warmupRef = useRef<HTMLParagraphElement | null>(null);
-  const statusRef = useRef<HTMLSpanElement | null>(null);
+  const warmupBarRef = useRef<HTMLSpanElement | null>(null);
+  const resortRef = useRef<HTMLSpanElement | null>(null);
+  const learnedRef = useRef<HTMLSpanElement | null>(null);
+  const supportRef = useRef<HTMLSpanElement | null>(null);
 
   useEffect(() => {
     const list = listRef.current;
     const wrap = wrapRef.current;
     const warmupEl = warmupRef.current;
-    const statusEl = statusRef.current;
-    if (list === null || wrap === null || warmupEl === null || statusEl === null) return;
+    const warmupBar = warmupBarRef.current;
+    const resortEl = resortRef.current;
+    const learnedEl = learnedRef.current;
+    const supportEl = supportRef.current;
+    if (
+      list === null ||
+      wrap === null ||
+      warmupEl === null ||
+      warmupBar === null ||
+      resortEl === null ||
+      learnedEl === null ||
+      supportEl === null
+    )
+      return;
 
     const dpr = window.devicePixelRatio || 1;
     const rows: Row[] = [];
@@ -206,7 +227,7 @@ export default function Surge() {
         if (row.root.style.transform !== y) row.root.style.transform = y;
         if (isNewBinding && !instant && row.entryAtMs === now) {
           // 진입 하이라이트는 즉시 점등 — 감쇠는 매 프레임 decayHighlights가 맡는다
-          row.root.style.backgroundColor = "rgba(74, 158, 255, 0.16)";
+          row.root.style.backgroundColor = `rgba(${HIGHLIGHT_RGB}, ${HIGHLIGHT_ALPHA})`;
         }
       }
       if (shown.length > 0) firstFill[activeTab] = false;
@@ -234,8 +255,8 @@ export default function Surge() {
           row.entryAtMs = Number.NEGATIVE_INFINITY;
           row.root.style.backgroundColor = "";
         } else {
-          const alpha = 0.16 * (1 - t / HIGHLIGHT_MS);
-          row.root.style.backgroundColor = `rgba(74, 158, 255, ${alpha.toFixed(3)})`;
+          const alpha = HIGHLIGHT_ALPHA * (1 - t / HIGHLIGHT_MS);
+          row.root.style.backgroundColor = `rgba(${HIGHLIGHT_RGB}, ${alpha.toFixed(3)})`;
         }
       }
     }
@@ -274,7 +295,13 @@ export default function Surge() {
           wrap!.dataset.warmup = String(showWarmup);
         }
         if (showWarmup) {
-          setText(warmupEl!, `베이스라인 학습 중 · ${(warmup.elapsedSec / 60).toFixed(1)}분 경과`);
+          setText(
+            warmupEl!,
+            `평소 사용량을 모으는 중 (${(warmup.elapsedSec / 60).toFixed(1)} / ${SURGE_WARMUP_SEC / 60}분)`,
+          );
+          const progress = Math.min(1, warmup.elapsedSec / SURGE_WARMUP_SEC);
+          const bar = `scaleX(${progress.toFixed(3)})`;
+          if (warmupBar!.style.transform !== bar) warmupBar!.style.transform = bar;
           render([], now, tabChanged);
         } else {
           render(surgingTab ? surge.surging : surge.sustained, now, tabChanged);
@@ -282,11 +309,9 @@ export default function Surge() {
 
         // 하단 상태줄 — 전부 워커 실측·실설정값
         const t = surge.tuning;
-        setText(
-          statusEl!,
-          `순위 갱신 ${t.resortSec}초 주기 · 베이스라인 학습 ${(warmup.elapsedSec / 60).toFixed(0)}분` +
-            ` · 최소 지지 ${t.minSupport}회/5분`,
-        );
+        setText(resortEl!, `${t.resortSec}초마다 순위 갱신`);
+        setText(learnedEl!, `기준선 ${(warmup.elapsedSec / 60).toFixed(0)}분치 학습`);
+        setText(supportEl!, `5분에 ${t.minSupport}회 이상 쓰인 단어만`);
       }
       decayHighlights(now);
       clearInstant(now);
@@ -333,7 +358,7 @@ export default function Surge() {
           ref={surgingTabRef}
           onClick={() => switchTab("surging")}
         >
-          급상승 · 5분
+          급상승 단어
         </button>
         <button
           type="button"
@@ -346,7 +371,7 @@ export default function Surge() {
           ref={sustainedTabRef}
           onClick={() => switchTab("sustained")}
         >
-          지속 · #태그
+          많이 쓰인 해시태그
         </button>
       </div>
       <div
@@ -360,11 +385,11 @@ export default function Surge() {
       >
         <div className={styles.colHead} aria-hidden="true">
           <span className={styles.rank}>#</span>
-          <span className={styles.delta}>Δ</span>
-          <span className={styles.token}>token</span>
-          <span className={styles.sparkCol}>15m</span>
-          <span className={styles.c5}>5m</span>
-          <span className={styles.mult}>×</span>
+          <span className={styles.delta}>변동</span>
+          <span className={styles.token}>단어</span>
+          <span className={styles.sparkCol}>15분 추이</span>
+          <span className={styles.c5}>5분</span>
+          <span className={styles.mult}>평소 대비</span>
           <span className={styles.chipCol}>상태</span>
         </div>
         <ol className={styles.list} style={{ height: SURGE_LIST_N * ROW_H }} ref={listRef}>
@@ -389,16 +414,25 @@ export default function Surge() {
             </li>
           ))}
         </ol>
-        <p className={styles.warmup} ref={warmupRef}>
-          베이스라인 학습 중
-        </p>
-        <p className={styles.empty}>awaiting trends…</p>
+        <div className={styles.warmup}>
+          <p className={styles.warmupTitle} ref={warmupRef}>
+            평소 사용량을 모으는 중
+          </p>
+          <span className={styles.warmupTrack} aria-hidden="true">
+            <span className={styles.warmupBar} ref={warmupBarRef} />
+          </span>
+          <p className={styles.warmupNote}>
+            급상승은 평소보다 얼마나 더 쓰이는지로 판단합니다. 처음 {SURGE_WARMUP_SEC / 60}분은
+            기준을 모으고, 그동안 해시태그 탭은 바로 볼 수 있습니다.
+          </p>
+        </div>
+        <p className={styles.empty}>집계할 단어를 기다리는 중</p>
       </div>
-      <div className={styles.statusBar}>
-        <span ref={statusRef} className={styles.status}>
-          순위 갱신 —
-        </span>
-      </div>
+      <p className={styles.statusBar}>
+        <span ref={resortRef}>순위 갱신 —</span>
+        <span ref={learnedRef} />
+        <span ref={supportRef} />
+      </p>
     </div>
   );
 }

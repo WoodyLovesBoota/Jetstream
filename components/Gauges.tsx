@@ -12,7 +12,7 @@ import styles from "./Gauges.module.css";
 // rAF 루프가 transform·textContent를 직접 만진다 — 데이터 경로 리렌더 금지(설계 §1.3).
 //
 // 셀 구성 (값은 전부 워커 실측 — GaugesSnapshot):
-//  (a) 배경 채움: 진행 중 1초의 부분 카운트 / 최근 60초 p95. transform: scaleY만
+//  (a) 레벨 미터: 진행 중 1초의 부분 카운트 / 최근 60초 p95. transform만
 //      만지므로 리플로우가 없다. 1초 경계에서 80ms 플러시(비움) 후 재충전.
 //  (b) 큰 숫자: 3초 EMA rate — 워커 계산값을 그대로 표시.
 //  (c) 델타: EMA vs 최근 1분 평균의 % 차이. |3%| 이내는 화살표 없이 "안정".
@@ -109,11 +109,12 @@ export default function Gauges() {
             } else {
               const pct = ((stat.ema - stat.avg60) / stat.avg60) * 100;
               const dir = Math.abs(pct) < DELTA_STABLE_PCT ? "flat" : pct > 0 ? "up" : "down";
+              // 부호는 진짜 마이너스(U+2212) — 하이픈은 숫자 옆에서 짧아 보인다
               setText(
                 cell.delta,
                 dir === "flat"
                   ? "안정"
-                  : `${dir === "up" ? "▲" : "▼"} ${Math.abs(pct).toFixed(0)}% vs 1m`,
+                  : `${dir === "up" ? "+" : "\u2212"}${Math.abs(pct).toFixed(0)}%`,
               );
               if (cell.delta.dataset.dir !== dir) cell.delta.dataset.dir = dir;
             }
@@ -121,9 +122,9 @@ export default function Gauges() {
         }
 
         // 채움은 매 프레임 — 플러시 애니메이션은 스냅샷 사이에서도 진행돼야 한다.
-        // 수면은 translateY로 끌어올린다: next=1이면 translateY(0%)로 가득, next=0이면
-        // translateY(100%)로 카드 아래로 밀려 비워진다. transform만 만지므로 리플로우가
-        // 없다(§1.3) — 물탱크 파도(자식 원)도 수면을 따라 함께 움직인다.
+        // 레벨은 translateY로 끌어올린다: next=1이면 translateY(0%)로 가득, next=0이면
+        // translateY(100%)로 슬롯 아래로 밀려 비워진다. transform만 만지므로 리플로우가
+        // 없다(§1.3).
         for (let i = 0; i < KINDS.length; i++) {
           const f = fills[i];
           const stat = g.stats[KINDS[i]];
@@ -146,7 +147,12 @@ export default function Gauges() {
   }, []);
 
   return (
-    <section className={styles.strip} aria-label="Gauges" ref={stripRef}>
+    <section
+      className={styles.strip}
+      aria-label="Gauges"
+      ref={stripRef}
+      title="큰 숫자는 최근 3초 평균 속도, 옆의 증감은 1분 평균 대비"
+    >
       {KINDS.map((k) => (
         <div
           key={k}
@@ -154,28 +160,22 @@ export default function Gauges() {
           data-type={k}
           style={{ "--type-color": TYPE_COLORS[k] } as CSSProperties}
         >
-          {/* 물탱크 수면 — 보조 채널이다(수치는 큰 숫자가 이미 전달한다). rAF가
-              translateY로 수위를 끌어올리고, 안쪽 두 원이 회전해 파도를 만든다. */}
-          <div className={styles.water} data-cell="fill" aria-hidden="true">
-            <span className={styles.waveA} />
-            <span className={styles.waveB} />
-          </div>
+          {/* 레벨 미터 — 이번 1초가 평소 최고치(p95)에 얼마나 찼는지. 보조 채널이다
+              (수치는 큰 숫자가 이미 전달한다). rAF가 translateY로 수위를 끌어올린다. */}
+          <span className={styles.meter} aria-hidden="true">
+            <span className={styles.level} data-cell="fill" />
+          </span>
           <div className={styles.content}>
-            <div className={styles.head}>
-              <span className={styles.labelWrap}>
-                <span className={styles.swatch} />
-                <span className={styles.label}>{k}</span>
-              </span>
-              <span className={styles.delta} data-cell="delta" data-dir="flat">
-                —
-              </span>
-            </div>
+            <span className={styles.label}>{k}</span>
             <div className={styles.num}>
               <span className={styles.value} data-cell="value">
                 —
               </span>
               <span className={styles.unit}>/s</span>
             </div>
+            <span className={styles.delta} data-cell="delta" data-dir="flat">
+              —
+            </span>
           </div>
         </div>
       ))}

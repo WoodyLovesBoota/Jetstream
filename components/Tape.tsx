@@ -39,7 +39,9 @@ export default function Tape() {
   const autoScrollRef = useRef(true);
   const nextId = useRef(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const statusRef = useRef<HTMLSpanElement | null>(null);
+  const strideRef = useRef<HTMLSpanElement | null>(null);
+  const sampledRef = useRef<HTMLSpanElement | null>(null);
+  const skippedRef = useRef<HTMLSpanElement | null>(null);
   /** 직전 렌더 이후 위쪽에 끼워 넣은 행 수 — 수동 스크롤 중 읽던 위치를 붙잡아 두는 데 쓴다 */
   const prependedRef = useRef(0);
 
@@ -58,11 +60,10 @@ export default function Tape() {
       if (isRenderPaused()) return;
 
       const t = snapshot.tapeStats;
-      if (statusRef.current) {
-        setText(
-          statusRef.current,
-          `showing 1 in ${t.strideN} · sampled ${t.sampledPerSec}/s · skipped ${t.skippedPerSec}/s`,
-        );
+      if (strideRef.current && sampledRef.current && skippedRef.current) {
+        setText(strideRef.current, t.strideN === 1 ? "전부 표시" : `${t.strideN}건 중 1건 표시`);
+        setText(sampledRef.current, `초당 ${t.sampledPerSec}건 표본`);
+        setText(skippedRef.current, `초당 ${t.skippedPerSec}건 건너뜀`);
       }
 
       if (snapshot.tapeRows.length === 0) return;
@@ -113,12 +114,14 @@ export default function Tape() {
   return (
     <div className={styles.root}>
       <div className={styles.statusBar}>
-        <span ref={statusRef} className={styles.status}>
-          showing 1 in 1 · sampled 0/s · skipped 0/s
-        </span>
+        <p className={styles.status}>
+          <span ref={strideRef}>전부 표시</span>
+          <span ref={sampledRef}>초당 0건 표본</span>
+          <span ref={skippedRef}>초당 0건 건너뜀</span>
+        </p>
         {!autoScroll && (
           <button type="button" className={styles.jumpBtn} onClick={jumpToLive}>
-            jump to live
+            최신 글로 이동
           </button>
         )}
       </div>
@@ -131,7 +134,7 @@ export default function Tape() {
         data-rows={rows.length}
       >
         {rows.length === 0 ? (
-          <p className={styles.empty}>awaiting samples…</p>
+          <p className={styles.empty}>첫 게시물을 기다리는 중</p>
         ) : (
           <div className={styles.spacer} style={{ height: rowVirtualizer.getTotalSize() }}>
             {rowVirtualizer.getVirtualItems().map((vi) => {

@@ -1,39 +1,48 @@
-/* 우측 컬럼 하단에 고정 배치되는 계기판 — 플로팅이 아니므로 다른 패널을 가리지 않는다 */
+/*
+ * 진단 줄 — 시트 맨 아래 한 줄짜리 텔레메트리. 계기판의 "뒷면"이라 가장 조용하게:
+ * 작은 글자, 잉크 3단계 중 가장 옅은 라벨. 값만 본문 잉크로 선다.
+ */
 .hud {
   flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px 28px;
   min-width: 0;
-  padding: 14px 18px 15px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  min-height: 40px;
+  padding: 8px var(--pad);
+  border-top: 1px solid var(--rule);
+  background: var(--paper-2);
+  font-size: 12px;
 }
 
 .head {
+  flex: none;
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
   gap: 12px;
-  margin-bottom: 6px;
 }
 
 .headRight {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 10px;
+}
+
+.title {
+  font-weight: 650;
+  color: var(--ink);
 }
 
 .instance {
-  font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 10px;
-  color: var(--muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  color: var(--ink-2);
 }
 
-/* 측정 모드 표시 — 켜져 있을 때만 보인다. 점이 느리게 깜박여 "기록 중"임을 알린다 */
+/* 측정 모드 표시 — 켜져 있을 때만 보인다. 느리게 깜박여 "기록 중"임을 알린다 */
 .rec {
-  font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.04em;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--danger);
   animation: recPulse 1.6s ease-in-out infinite;
 }
@@ -48,83 +57,71 @@
   }
 }
 
-.title {
-  display: block;
-  font-family: var(--font-sans), var(--font-kr), sans-serif;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.22em;
-  color: #c9d4e0;
-}
-
-/* 배너는 둘 다 숨겨져 있는 것이 정상 상태라 평소에는 HUD 높이에 영향을 주지 않는다 */
-.notices:has(> .notice:not([hidden])) {
-  margin-bottom: 7px;
+/* 배너는 둘 다 숨겨져 있는 것이 정상 상태 — 비어 있으면 폭 0. aria-live 영역이라
+   display로 감추지 않는다(감추면 전이 알림이 스크린리더에 닿지 않는다). */
+.notices {
+  flex: none;
   display: flex;
-  flex-direction: column;
-  gap: 5px;
+  gap: 8px;
 }
 
 .notice {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   margin: 0;
-  padding: 5px 9px;
-  border-left: 2px solid currentColor;
-  border-radius: 0 6px 6px 0;
-  background: color-mix(in srgb, currentColor 10%, transparent);
-  font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 10px;
-  line-height: 1.45;
+  padding: 3px 10px;
+  border-radius: 3px;
+  color: var(--paper);
   white-space: nowrap;
 }
 
+.notice[hidden] {
+  display: none;
+}
+
 .notice[data-kind="degraded"] {
-  color: var(--danger);
+  background: var(--danger);
 }
 
 .notice[data-kind="paused"] {
-  color: var(--warn);
+  background: var(--warn);
 }
 
 .noticeTitle {
-  display: block;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font-weight: 650;
 }
 
 .noticeDetail {
-  display: block;
-  font-variant-numeric: tabular-nums;
-  color: var(--text);
-  opacity: 0.8;
+  opacity: 0.92;
 }
 
 .list {
-  margin: 0;
+  flex: 1;
+  min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 22px;
+  margin: 0;
 }
 
 .row {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 7px;
+  white-space: nowrap;
 }
 
 .label {
-  font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 11px;
-  color: var(--muted);
+  color: var(--ink-3);
 }
 
 .value {
   margin: 0;
-  font-family: var(--font-mono), var(--font-kr), monospace;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  color: var(--text);
+  font-weight: 550;
+  color: var(--ink);
 }
 
 .value[data-state="live"] {
@@ -143,4 +140,15 @@
 .value[data-state="closed"],
 .value[data-state="failed"] {
   color: var(--danger);
+}
+
+@media (max-width: 1279.98px) {
+  .hud {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .list {
+    justify-content: flex-start;
+  }
 }

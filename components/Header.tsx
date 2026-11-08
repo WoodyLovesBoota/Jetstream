@@ -22,11 +22,9 @@ export default function Header() {
   return (
     <header className={styles.header}>
       <div className={styles.brand}>
-        {/* 페이지 유일의 h1 — 패널 이름(h2)들의 상위 표제. 스타일은 .mark가 전담한다 */}
-        <h1 className={styles.mark}>
-          JET<span className={styles.markDot}>·</span>STREAM
-        </h1>
-        <span className={styles.sub}>bluesky firehose deck</span>
+        {/* 페이지 유일의 h1 — 패널 이름(h2)들의 상위 표제 */}
+        <h1 className={styles.mark}>Jetstream</h1>
+        <p className={styles.sub}>Bluesky 전체 공개 이벤트를 브라우저에서 직접 받아 그리는 실시간 계기판</p>
       </div>
       <div className={styles.controls}>
         <span
@@ -51,7 +49,7 @@ export default function Header() {
               : "app.bsky.feed.* + app.bsky.graph.follow. 누르면 풀 스트림으로 연다"
           }
         >
-          {full ? "full stream" : "filtered"}
+          {full ? "전체 컬렉션" : "주요 컬렉션"}
         </button>
         <button
           type="button"
@@ -61,7 +59,7 @@ export default function Header() {
           onClick={toggleRenderPause}
           title="렌더만 정지한다 — 워커는 계속 수신·집계하고, 재개하면 최신 상태로 점프한다"
         >
-          {paused ? "Resume" : "Pause"}
+          {paused ? "재개" : "일시정지"}
         </button>
       </div>
     </header>

@@ -24,12 +24,12 @@ export default function ErrorPage({
   return (
     <div className={styles.veil} role="alert">
       <div className={styles.card}>
-        <p className={styles.label}>deck fault</p>
+        <p className={styles.label}>화면을 그리다 오류가 났습니다</p>
         <p className={styles.detail}>
-          {error.digest !== undefined ? `digest ${error.digest}` : error.message}
+          {error.digest !== undefined ? `오류 코드 ${error.digest}` : error.message}
         </p>
         <button type="button" className={styles.btn} onClick={() => unstable_retry()}>
-          retry render
+          다시 그리기
         </button>
       </div>
     </div>

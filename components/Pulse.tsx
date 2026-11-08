@@ -7,7 +7,7 @@ import type { GapMarker, SecondBucket, StreamSnapshot } from "@/lib/jetstream/pr
 import { isRenderPaused } from "@/lib/jetstream/renderGate";
 import { subscribeStream } from "@/lib/jetstream/useStreamWorker";
 import { setText } from "@/lib/dom";
-import { TYPE_COLORS, withAlpha } from "@/lib/palette";
+import { SHEET, TYPE_COLORS, withAlpha } from "@/lib/palette";
 import styles from "./Pulse.module.css";
 
 // Pulse는 React를 차트 컨테이너 마운트에만 쓴다. uPlot 인스턴스는 1회 생성 후
@@ -15,6 +15,7 @@ import styles from "./Pulse.module.css";
 
 const WINDOW_OPTIONS = [60, 300] as const;
 type WindowSec = (typeof WINDOW_OPTIONS)[number];
+const WINDOW_LABEL: Record<WindowSec, string> = { 60: "1분", 300: "5분" };
 
 interface SeriesDef {
   label: string;
@@ -33,11 +34,12 @@ const SERIES: SeriesDef[] = [
   { label: "other", collection: null, color: TYPE_COLORS.other },
 ];
 
-// canvas는 CSS 커스텀 프로퍼티를 해석 못 한다 — app/globals.css 토큰값을 그대로 옮김
-const AXIS_STROKE = "#8b98a6"; // --muted
-const GRID_STROKE = "#1c2632"; // --line
-const GAP_STROKE = "#f0546a"; // --danger — 아직 비어 있는 단절 구간
-const REPLAY_STROKE = "#4a9eff"; // --accent — 되감기가 메운 구간
+// canvas는 CSS 커스텀 프로퍼티를 해석 못 한다 — lib/palette.ts의 SHEET(= globals.css 토큰)
+const AXIS_STROKE = SHEET.ink3;
+const GRID_MAJOR = SHEET.gridMajor; // 모눈 대눈금 — 축 라벨이 붙는 선
+const GRID_MINOR = SHEET.grid; // 모눈 소눈금 — 기록지 바탕
+const GAP_STROKE = SHEET.danger; // 아직 비어 있는 단절 구간
+const REPLAY_STROKE = SHEET.accent; // 되감기가 메운 구간
 
 /** 우측 끝 현재값 라벨 사이에 확보하는 최소 세로 간격(px) */
 const EDGE_LABEL_GAP = 12;
@@ -238,11 +240,33 @@ function drawGaps(u: uPlot, gaps: GapMarker[], fontFamily: string): void {
       ctx.fillStyle = withAlpha(color, 0.85);
       ctx.font = `10px ${fontFamily}`;
       ctx.textBaseline = "top";
-      ctx.fillText(gap.replayed ? "replay" : "gap", left + 4, u.bbox.top + 4);
+      ctx.fillText(gap.replayed ? "복구" : "끊김", left + 4, u.bbox.top + 4);
     }
   }
 
   ctx.restore();
+}
+
+function formatAxisTime(sec: number): string {
+  const d = new Date(sec * 1000);
+  const ss = d.getSeconds();
+  if (ss !== 0) return `:${String(ss).padStart(2, "0")}`;
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/** 라벨·틱 없이 격자만 긋는 소눈금 축 — 모눈 기록지의 바탕 */
+function minorAxis(scale: "x" | "y", side: 2 | 3, space: number): uPlot.Axis {
+  return {
+    scale,
+    side,
+    space,
+    size: 0,
+    gap: 0,
+    values: (_u, splits) => splits.map(() => ""),
+    stroke: "transparent",
+    grid: { stroke: GRID_MINOR, width: 1 },
+    ticks: { show: false },
+  };
 }
 
 function buildOpts(
@@ -260,9 +284,9 @@ function buildOpts(
     ...SERIES.map((def, i) => ({
       label: def.label,
       stroke: def.color,
-      width: 2,
+      width: 1.5,
       // 맨 아래 시리즈(post)만 0까지 직접 채우고, 그 위는 전부 band가 채운다
-      fill: i === 0 ? withAlpha(def.color, 0.1) : undefined,
+      fill: i === 0 ? withAlpha(def.color, 0.12) : undefined,
       points: { show: false as const },
     })),
   ];
@@ -271,7 +295,7 @@ function buildOpts(
   // (uPlot bands: series[0]=위쪽 경계="from", series[1]=아래쪽 경계="to")
   const bands: uPlot.Band[] = [];
   for (let idx = 2; idx <= SERIES.length; idx++) {
-    bands.push({ series: [idx, idx - 1], fill: withAlpha(SERIES[idx - 1].color, 0.1) });
+    bands.push({ series: [idx, idx - 1], fill: withAlpha(SERIES[idx - 1].color, 0.12) });
   }
 
   return {
@@ -290,23 +314,35 @@ function buildOpts(
       x: { time: true },
       y: { range: (_u, _min, max) => [0, max <= 0 ? 1 : max * 1.1] },
     },
-    // 낮은 밴드라 축은 최대한 얇게 — 단위(events/sec)는 패널 note가 이미 말한다
+    // 기록지 모눈: 라벨 없는 소눈금 축을 먼저 깔고, 그 위에 라벨이 붙는 대눈금 축을
+    // 얹는다(격자는 축 순서대로 그려진다). uPlot은 0번 축을 x로 가정하므로 모든 축에
+    // scale·side를 명시한다. 두 축 모두 uPlot의 1-2-5 증분에서 간격을 고르므로 소눈금이 대눈금을
+    // 나눠 떨어지게 맞물린다. 단위(events/sec)는 패널 note가 이미 말한다.
     axes: [
+      minorAxis("x", 2, 12),
+      minorAxis("y", 3, 10),
       {
+        scale: "x",
+        side: 2,
+        // uPlot 기본 시간 포맷은 분 경계에서 날짜 줄을 하나 더 붙이는데, 낮은 축 높이에서
+        // 잘린다 — 한 줄로: 분 경계는 "14:06", 그 사이는 ":25"
+        values: (_u, splits) => splits.map(formatAxisTime),
         stroke: AXIS_STROKE,
         font: axisFont,
-        size: 22,
-        gap: 3,
-        grid: { stroke: GRID_STROKE, width: 1 },
-        ticks: { stroke: GRID_STROKE, width: 1, size: 6 },
+        size: 24,
+        gap: 5,
+        grid: { stroke: GRID_MAJOR, width: 1 },
+        ticks: { show: false },
       },
       {
+        scale: "y",
+        side: 3,
         stroke: AXIS_STROKE,
         font: labelFont,
         size: 40,
-        gap: 3,
-        grid: { stroke: GRID_STROKE, width: 1 },
-        ticks: { stroke: GRID_STROKE, width: 1, size: 6 },
+        gap: 6,
+        grid: { stroke: GRID_MAJOR, width: 1 },
+        ticks: { show: false },
       },
     ],
   };
@@ -321,8 +357,9 @@ export default function Pulse() {
     const wrap = wrapRef.current;
     if (wrap === null) return;
 
-    // canvas는 CSS 변수를 못 읽으므로 실측한 --font-mono 값을 그대로 넘긴다
-    const fontFamily = getComputedStyle(wrap).getPropertyValue("--font-mono").trim() || "monospace";
+    // canvas는 CSS 변수를 못 읽으므로 실측한 --font-sans 값을 그대로 넘긴다
+    const fontFamily =
+      getComputedStyle(wrap).getPropertyValue("--font-sans").trim() || "system-ui, sans-serif";
     const rect = wrap.getBoundingClientRect();
     // draw 훅은 최신 갭 목록을 그때그때 읽어야 한다 — 스냅샷마다 opts를 새로
     // 만들 수는 없으므로 이펙트 스코프의 변수를 게터로 넘긴다
@@ -403,22 +440,21 @@ export default function Pulse() {
   return (
     <div className={styles.root}>
       <div className={styles.controls}>
+        {/* 네 주요 타입의 범례는 머리줄 펜 리드아웃이 겸한다 — 여기엔 그 밖의 표식만 */}
         <ul className={styles.legend}>
-          {SERIES.map((def) => (
-            <li key={def.label} className={styles.legendItem}>
-              <span className={styles.swatch} style={{ background: def.color }} />
-              {def.label}
-            </li>
-          ))}
+          <li className={styles.legendItem}>
+            <span className={styles.swatch} style={{ background: TYPE_COLORS.other }} />
+            기타 컬렉션
+          </li>
           {/* 단절 마커 범례 — 띠가 나타났을 때 무슨 뜻인지 화면 안에서 읽히도록 */}
           {[
-            { label: "gap", color: GAP_STROKE },
-            { label: "replay", color: REPLAY_STROKE },
+            { label: "끊김", color: GAP_STROKE },
+            { label: "복구", color: REPLAY_STROKE },
           ].map((m) => (
             <li key={m.label} className={styles.legendItem}>
               <span
                 className={styles.bandSwatch}
-                style={{ background: withAlpha(m.color, 0.15), borderColor: withAlpha(m.color, 0.7) }}
+                style={{ background: withAlpha(m.color, 0.12), borderColor: withAlpha(m.color, 0.8) }}
               />
               {m.label}
             </li>
@@ -436,7 +472,7 @@ export default function Pulse() {
                 setWindowSec(w);
               }}
             >
-              {w}s
+              {WINDOW_LABEL[w]}
             </button>
           ))}
         </div>

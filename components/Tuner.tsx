@@ -87,8 +87,8 @@ function TunerPanel() {
   return (
     <aside className={styles.tuner} aria-label="Surge tuner" data-open="true">
       <div className={styles.head}>
-        <span className={styles.title}>SURGE TUNER</span>
-        <span className={styles.hint}>t 키로 닫기 · 세션 한정</span>
+        <span className={styles.title}>Surge 튜닝</span>
+        <span className={styles.hint}>t 키로 닫기, 이 세션에만 적용</span>
       </div>
       <div className={styles.fields}>
         {FIELDS.map((f) => (

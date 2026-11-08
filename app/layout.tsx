@@ -1,25 +1,24 @@
 import type { Metadata, Viewport } from "next";
-import { Space_Grotesk, JetBrains_Mono, IBM_Plex_Sans_KR } from "next/font/google";
+import { Archivo, IBM_Plex_Mono, IBM_Plex_Sans_KR } from "next/font/google";
 import "./globals.css";
 
-// 디스플레이 서체 — 로고와 패널 타이틀(PULSE·SURGE…)의 넓은 자간 표제 전용.
-const displaySans = Space_Grotesk({
+// 주 서체 — UI 전반. wdth 축(62–125)을 함께 받아 한 패밀리 안에서 폭으로 위계를 만든다:
+// 리드아웃 숫자는 좁게(계기 눈금처럼), 워드마크는 넓게.
+const sans = Archivo({
   variable: "--font-sans",
   subsets: ["latin"],
-  weight: ["500", "600", "700"],
+  axes: ["wdth"],
 });
 
-// 본문·수치 전반의 기본 서체 — 계기판 특유의 등폭 감을 준다.
-const bodyMono = JetBrains_Mono({
+// 식별자 전용 — 타임스탬프·DID처럼 글자 단위로 읽히는 값에만 쓴다(라벨에는 쓰지 않는다).
+const mono = IBM_Plex_Mono({
   variable: "--font-mono",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  weight: ["400", "500"],
 });
 
-// 한글 라벨("안정"·"신규"·"베이스라인 학습 중")용 폴백 — Space Grotesk/JetBrains
-// Mono의 latin 서브셋 밖이라 시스템 폰트로 떨어지던 글리프를 Plex Sans KR로 받는다.
-// 폰트 체인에서 뒤에 서므로 라틴 글리프에는 관여하지 않고, preload: false라 한글이
-// 실제 등장할 때 unicode-range 슬라이스 단위로만 내려온다.
+// 한글 폴백 — Archivo의 latin 서브셋 밖 글리프를 받는다. 체인 뒤에 서므로 라틴에는
+// 관여하지 않고, preload: false라 한글이 실제 등장할 때 unicode-range 슬라이스만 내려온다.
 const plexSansKR = IBM_Plex_Sans_KR({
   variable: "--font-kr",
   subsets: ["latin"],
@@ -47,8 +46,8 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#070a0f",
-  colorScheme: "dark",
+  themeColor: "#f2f4f1",
+  colorScheme: "light",
 };
 
 export default function RootLayout({
@@ -57,7 +56,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ko" className={`${displaySans.variable} ${bodyMono.variable} ${plexSansKR.variable}`}>
+    <html lang="ko" className={`${sans.variable} ${mono.variable} ${plexSansKR.variable}`}>
       <body>{children}</body>
     </html>
   );

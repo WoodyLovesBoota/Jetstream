@@ -38,9 +38,9 @@ export default function DeckStatus() {
       if (detailRef.current !== null && next === "failed") {
         const retry =
           s.conn.retryInMs > 0
-            ? `retrying in ${Math.ceil(s.conn.retryInMs / 1000)}s`
-            : "reconnecting…";
-        const text = `cycled all instances · attempt ${s.conn.attempt} · ${retry}`;
+            ? `${Math.ceil(s.conn.retryInMs / 1000)}초 뒤 다시 시도합니다.`
+            : "다시 연결하는 중입니다.";
+        const text = `공식 인스턴스를 모두 돌며 ${s.conn.attempt}번 시도했습니다. ${retry}`;
         if (detailRef.current.textContent !== text) detailRef.current.textContent = text;
       }
     });
@@ -58,20 +58,16 @@ export default function DeckStatus() {
           <span className={styles.core} />
           {!failed && <span className={styles.sweep} />}
         </div>
-        <p className={styles.label}>{failed ? "signal lost" : "connecting"}</p>
+        <p className={styles.label}>{failed ? "연결이 끊겼습니다" : "파이어호스에 연결하는 중"}</p>
         <p className={styles.sub}>
-          <span className={styles.inst} ref={instRef}>
-            —
-          </span>
-          <span className={styles.dot}>·</span>
-          bluesky firehose
+          인스턴스 <span className={styles.inst} ref={instRef}>—</span>
         </p>
         {failed ? (
           <p className={styles.detail} ref={detailRef}>
-            cycled all instances · retrying
+            공식 인스턴스를 모두 시도했습니다. 다시 연결하는 중입니다.
           </p>
         ) : (
-          <p className={styles.detail}>opening websocket · live tail</p>
+          <p className={styles.detail}>WebSocket을 열고 첫 이벤트를 기다립니다.</p>
         )}
       </div>
     </div>

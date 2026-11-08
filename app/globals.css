@@ -1,24 +1,40 @@
+/*
+ * 디자인 언어: 스트립 차트 기록계(chart recorder).
+ * 차가운 기록지 위에 잉크 펜으로 그린다 — 카드·글로우·그라데이션 없이 한 장의 시트를
+ * 괘선으로 나눈다. 대비는 전부 --paper 기준 실측(텍스트 4.5:1 이상, 선·면 3:1 이상).
+ */
 :root {
-  --bg: #070a0f;
-  --surface: #0f1621;
-  --surface-2: #0c121b;
-  --line: #1c2632;
-  --tick: #2b3c50;
-  --text: #e6edf3;
-  --muted: #8b98a6;
-  /* 가장 흐린 텍스트 톤(빈 상태·자리표시·소형 라벨). #0f1621 서피스 위에서 3:1을
-     넘기되(≈3.4:1) --muted(≈6.4:1)보다는 확실히 어둡게 유지 — 계층은 그대로 두고
-     대비만 확보한다. 시안이 쓰는 #4a5563(≈2.4:1)까지 내리지는 않는다. */
-  --faint: #5c6b7a;
-  --accent: #4a9eff;
-  --ok: #3fb950;
-  --warn: #e3a838;
-  --danger: #f0546a;
-  --repost: #f778ba;
-  --gap: 14px;
+  /* 바탕 */
+  --paper: #f2f4f1; /* 기록지 — 살짝 녹회색으로 식힌 종이 */
+  --paper-2: #e7ebe6; /* 트랙·눌린 컨트롤 */
+  --sheet-edge: #dfe4de; /* 시트 바깥(넓은 화면 여백) */
+
+  /* 잉크 */
+  --ink: #17242c; /* 본문·숫자  14.3:1 */
+  --ink-2: #4c5a62; /* 보조 텍스트  6.4:1 */
+  --ink-3: #5f6c73; /* 캡션·자리표시  4.9:1 */
+
+  /* 괘선 */
+  --rule: #c9d1cb; /* 패널 경계 */
+  --grid: #dde4de; /* 모눈 소눈금 */
+  --grid-major: #c4cfc7; /* 모눈 대눈금 */
+
+  /* 펜 잉크 — lib/palette.ts와 짝(타입 ↔ 색은 화면 어디서나 같다) */
+  --pen-post: #2152c4;
+  --pen-like: #c8326b;
+  --pen-repost: #107a54;
+  --pen-follow: #9a600f;
+  --pen-other: #7b868c;
+
+  /* 상태 */
+  --ok: #107a54;
+  --warn: #9a600f;
+  --danger: #c23a18;
+  --accent: #2152c4;
+
+  --gap: 0px;
   --pad: 20px;
-  --radius: 12px;
-  --radius-sm: 8px;
+  --radius-sm: 6px;
 }
 
 *,
@@ -28,7 +44,7 @@
 }
 
 html {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 html,
@@ -39,13 +55,15 @@ body {
 }
 
 body {
-  background:
-    radial-gradient(75rem 37rem at 20% -10%, #0d1420 0%, transparent 60%),
-    var(--bg);
-  color: var(--text);
-  font-family: var(--font-mono), var(--font-kr), monospace;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans), var(--font-kr), system-ui, sans-serif;
   font-size: 14px;
   line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  /* 한글은 어절 단위로만 줄을 바꾼다 — "1 / 분"처럼 낱말 중간에서 끊기지 않게 */
+  word-break: keep-all;
+  overflow-wrap: break-word;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -53,8 +71,12 @@ button {
   font: inherit;
 }
 
+::selection {
+  background: color-mix(in srgb, var(--pen-post) 22%, transparent);
+}
+
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--pen-post);
   outline-offset: 2px;
 }
 
