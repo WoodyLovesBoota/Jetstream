@@ -18,25 +18,28 @@ export default function Home() {
   return (
     <div className={styles.deck}>
       <Header />
-      <Panel
-        name="Pulse"
-        note="초당 이벤트 수. 증감은 1분 평균 대비"
-        className={styles.pulse}
-        readouts={<Gauges />}
-      >
-        <Pulse />
-      </Panel>
-      <main className={styles.grid}>
-        <Panel name="Surge" note="평소보다 갑자기 많이 쓰이는 단어" className={styles.surge}>
-          <Surge />
+      {/* 랜드마크 — 기록계(Pulse)도 본문이다. 헤더(banner)·HUD(complementary) 사이 전부가 main */}
+      <main className={styles.main}>
+        <Panel
+          name="Pulse"
+          note="초당 이벤트 수. 증감은 1분 평균 대비"
+          className={styles.pulse}
+          readouts={<Gauges />}
+        >
+          <Pulse />
         </Panel>
-        <div className={styles.side}>
-          <Panel name="Tape" note="새 게시물 표본" className={styles.tape}>
-            <Tape />
+        <div className={styles.grid}>
+          <Panel name="Surge" note="평소보다 갑자기 많이 쓰이는 단어" className={styles.surge}>
+            <Surge />
           </Panel>
-          <Panel name="Mix" note="게시물 언어 비율, 최근 60초" className={styles.mix}>
-            <Mix />
-          </Panel>
+          <div className={styles.side}>
+            <Panel name="Tape" note="새 게시물 표본" className={styles.tape}>
+              <Tape />
+            </Panel>
+            <Panel name="Mix" note="게시물 언어 비율, 최근 60초" className={styles.mix}>
+              <Mix />
+            </Panel>
+          </div>
         </div>
       </main>
       <Hud />

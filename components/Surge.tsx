@@ -297,7 +297,7 @@ export default function Surge() {
         if (showWarmup) {
           setText(
             warmupEl!,
-            `평소 사용량을 모으는 중 (${(warmup.elapsedSec / 60).toFixed(1)} / ${SURGE_WARMUP_SEC / 60}분)`,
+            `평소 사용량을 모으는 중… (${(warmup.elapsedSec / 60).toFixed(1)} / ${SURGE_WARMUP_SEC / 60}분)`,
           );
           const progress = Math.min(1, warmup.elapsedSec / SURGE_WARMUP_SEC);
           const bar = `scaleX(${progress.toFixed(3)})`;
@@ -379,6 +379,8 @@ export default function Surge() {
         ref={wrapRef}
         id="surge-tabpanel"
         role="tabpanel"
+        // 패널 안에 포커스 가능한 요소가 없으니 패널 자체가 탭 순서에 선다(APG 탭 패턴)
+        tabIndex={0}
         aria-labelledby={tab === "surging" ? "surge-tab-surging" : "surge-tab-sustained"}
         data-empty="true"
         data-warmup="false"
@@ -416,7 +418,7 @@ export default function Surge() {
         </ol>
         <div className={styles.warmup}>
           <p className={styles.warmupTitle} ref={warmupRef}>
-            평소 사용량을 모으는 중
+            평소 사용량을 모으는 중…
           </p>
           <span className={styles.warmupTrack} aria-hidden="true">
             <span className={styles.warmupBar} ref={warmupBarRef} />
@@ -426,7 +428,7 @@ export default function Surge() {
             기준을 모으고, 그동안 해시태그 탭은 바로 볼 수 있습니다.
           </p>
         </div>
-        <p className={styles.empty}>집계할 단어를 기다리는 중</p>
+        <p className={styles.empty}>집계할 단어를 기다리는 중…</p>
       </div>
       <p className={styles.statusBar}>
         <span ref={resortRef}>순위 갱신 —</span>

@@ -55,12 +55,18 @@ export default function DeckStatus() {
       <div className={styles.card}>
         <div className={styles.glyph} data-mode={mode} aria-hidden>
           <span className={styles.ring} />
-          <span className={styles.core} />
+          {/* 펜 끝은 시트 폭만 한 캐리지의 오른쪽 끝에 달려 있고, 캐리지가 transform으로 미끄러진다 */}
+          <span className={styles.carriage}>
+            <span className={styles.core} />
+          </span>
           {!failed && <span className={styles.sweep} />}
         </div>
-        <p className={styles.label}>{failed ? "연결이 끊겼습니다" : "파이어호스에 연결하는 중"}</p>
+        <p className={styles.label}>{failed ? "연결이 끊겼습니다" : "파이어호스에 연결하는 중…"}</p>
         <p className={styles.sub}>
-          인스턴스 <span className={styles.inst} ref={instRef}>—</span>
+          인스턴스{" "}
+          <span className={styles.inst} ref={instRef}>
+            —
+          </span>
         </p>
         {failed ? (
           <p className={styles.detail} ref={detailRef}>

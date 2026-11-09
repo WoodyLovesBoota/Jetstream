@@ -425,7 +425,7 @@ Tuner                                   ← dev 전용, "t" 키 토글
 - 상위 8개(`MIX_TOP_N`) + other 잔여 한 줄. other는 뺄셈으로 구하므로 **막대 합 =
   total이 항상 정확히 성립**(검산용으로 `data-total` 속성에도 실어둔다).
 - 동률은 코드순 고정 정렬(아니면 같은 값끼리 매 틱 자리를 바꿔 깜빡인다).
-- 고정 9행 풀에 textContent·style.width만 갱신. 언어명 툴팁은 `Intl.DisplayNames`
+- 고정 9행 풀에 textContent·transform(scaleX)만 갱신. 언어명 툴팁은 `Intl.DisplayNames`
   (+캐시), 상태줄: `n 12,345 · 23 langs · nolang 456`.
 
 ### 4.7 Hud — 진단 계기판 (Pause의 유일한 예외)

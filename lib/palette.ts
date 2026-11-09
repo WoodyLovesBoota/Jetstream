@@ -21,10 +21,10 @@ export const SHEET = {
   paper: "#f2f4f1",
   ink: "#17242c",
   ink2: "#4c5a62",
-  ink3: "#5f6c73",
+  ink3: "#5e6a71",
   grid: "#dde4de",
   gridMajor: "#c4cfc7",
-  danger: "#c23a18",
+  danger: "#bd3917",
   accent: "#2152c4",
 } as const;
 

@@ -252,7 +252,7 @@ worker → main은 `StreamSnapshot` 객체 그 자체다(래핑 없음).
   (메타 한 줄 + 본문 `-webkit-line-clamp: 2`). 행 높이 상수(56px)는 가상화
   estimateSize·스크롤 보정과 맞물린다.
 - Mix는 9개(상위 8 + other) 막대 행을 마운트 시 1회 만들고, rAF 틱마다 스냅샷이
-  바뀔 때만 `textContent`와 채움 막대의 `style.width`를 갱신한다.
+  바뀔 때만 `textContent`와 채움 막대의 `transform: scaleX`를 갱신한다.
 - Surge(R4)는 SURGE_LIST_N(10)개 행 풀을 마운트 시 1회 만들고 토큰에 바인딩해
   재사용한다. 순위 이동은 FLIP — `transform: translateY`만 바꾸고 CSS transition
   400ms가 흐른다(리플로우 없음). 재정렬은 워커가 5초 주기로만 하므로 재배치도

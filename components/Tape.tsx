@@ -130,11 +130,15 @@ export default function Tape() {
       <div
         className={styles.scrollArea}
         ref={scrollRef}
+        // 스크롤 컨테이너를 키보드로도 굴릴 수 있게(Safari는 스크롤러를 자동 포커스하지 않는다)
+        tabIndex={0}
+        role="region"
+        aria-label="새 게시물 목록"
         onScroll={handleScroll}
         data-rows={rows.length}
       >
         {rows.length === 0 ? (
-          <p className={styles.empty}>첫 게시물을 기다리는 중</p>
+          <p className={styles.empty}>첫 게시물을 기다리는 중…</p>
         ) : (
           <div className={styles.spacer} style={{ height: rowVirtualizer.getTotalSize() }}>
             {rowVirtualizer.getVirtualItems().map((vi) => {
@@ -147,10 +151,15 @@ export default function Tape() {
                 >
                   <div className={styles.meta}>
                     <span className={styles.time}>{formatTimeUs(row.timeUs)}</span>
-                    <span className={styles.did}>{row.did}</span>
+                    <span className={styles.did} translate="no">
+                      {row.did}
+                    </span>
                     <span className={styles.langs}>{row.langs.join(",") || "—"}</span>
                   </div>
-                  <p className={styles.text}>{row.text}</p>
+                  {/* 본문 언어를 실어 스크린리더 발음과 한자 글리프(ja/zh/ko) 선택이 맞게 한다 */}
+                  <p className={styles.text} lang={row.langs[0]}>
+                    {row.text}
+                  </p>
                 </div>
               );
             })}

@@ -166,9 +166,10 @@ export default function Mix() {
         setText(row.label, slice.lang === "other" ? "기타" : slice.lang);
         setText(row.pct, formatPct(slice.count, total));
 
-        // 막대 길이 = 전체 표본 대비 점유율. %와 같은 수를 말한다.
-        const width = `${((slice.count / total) * 100).toFixed(2)}%`;
-        if (row.fill.style.width !== width) row.fill.style.width = width;
+        // 막대 길이 = 전체 표본 대비 점유율. %와 같은 수를 말한다. width가 아니라
+        // scaleX로 그어 10Hz × 9행 갱신이 레이아웃을 건드리지 않게 한다(합성만).
+        const transform = `scaleX(${(slice.count / total).toFixed(4)})`;
+        if (row.fill.style.transform !== transform) row.fill.style.transform = transform;
 
         const posts = `${slice.count.toLocaleString("en-US")} posts`;
         setAttr(
@@ -217,13 +218,13 @@ export default function Mix() {
               <span className={styles.label} data-cell="label" />
               {/* 막대는 보조 채널 — 수치는 오른쪽 %가 이미 전달한다 */}
               <span className={styles.track} aria-hidden="true">
-                <span className={styles.fill} data-cell="fill" style={{ width: "0%" }} />
+                <span className={styles.fill} data-cell="fill" style={{ transform: "scaleX(0)" }} />
               </span>
               <span className={styles.pct} data-cell="pct" />
             </li>
           ))}
         </ul>
-        <p className={styles.empty}>게시물을 기다리는 중</p>
+        <p className={styles.empty}>게시물을 기다리는 중…</p>
       </div>
     </div>
   );

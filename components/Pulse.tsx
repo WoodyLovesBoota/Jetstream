@@ -384,7 +384,9 @@ export default function Pulse() {
     const edgeEls = SERIES.map((def) => {
       const el = document.createElement("div");
       el.className = styles.edgeLabel;
-      el.style.color = def.color;
+      // other 펜(#7b868c)은 선·면 기준(3:1)만 넘는다 — 글자로 쓰면 4.5:1 미달이라
+      // 숫자는 캡션 잉크로 적는다. 어느 선의 값인지는 선 끝에 붙는 위치가 말해준다.
+      el.style.color = def.label === "other" ? SHEET.ink3 : def.color;
       el.style.visibility = "hidden";
       plot.over.appendChild(el);
       return el;

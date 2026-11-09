@@ -9,6 +9,14 @@
   background: var(--paper);
 }
 
+/* 본문 랜드마크 — 기록계 + 메인 그리드를 세로로 쌓는다 */
+.main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 /*
  * 기록계 — 머리줄(펜 리드아웃) + 모눈 스트립 차트. 반드시 **정해진 높이**여야 한다:
  * 내부 차트가 height: 100% 체인으로 이 값을 받아 가므로, auto가 되는 순간 차트

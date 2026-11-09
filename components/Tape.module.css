@@ -38,6 +38,11 @@
   font-weight: 500;
   color: var(--paper);
   cursor: pointer;
+  transition: transform 160ms var(--ease-out);
+}
+
+.jumpBtn:active {
+  transform: scale(0.97);
 }
 
 .jumpBtn:hover {
@@ -53,6 +58,11 @@
   overflow-y: auto;
   overflow-x: hidden;
   border-top: 1px solid var(--rule);
+}
+
+/* 컬럼 안쪽으로 링을 그린다 — 바깥 오프셋은 이웃 괘선과 겹친다 */
+.scrollArea:focus-visible {
+  outline-offset: -2px;
 }
 
 .spacer {
