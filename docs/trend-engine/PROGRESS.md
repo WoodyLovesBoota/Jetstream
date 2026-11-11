@@ -28,3 +28,7 @@
 ### M2 — 중복 제거·봇 ✅
 - `src/trend/dedup.ts` (`AuthorDedup`): 분 단위 (DID,후보) 32비트 Set, 분당 post>20 → 10분 뮤트, 참여는 분당 60 문턱. 테스트 4건(봇 태그 6계정 → 30회 상한 포함).
 - 다음: M3 카운터.
+### M3 — 카운터 ✅
+- `cms.ts`(4×65,536 uint16 × 6분 링, 보수적 갱신), `tracked.ts`(슬랩 10초×90 버킷, 일괄 퇴출), `hot.ts`(작성자 16분 비트마스크·최근 글·post-ID·링크/언어), `spacesaving.ts`(p: top-k 20,000, 분 링 30, 일괄 퇴출).
+- 테스트 10건 추가(누적 31): CMS 과소추정 0·평균오차<0.5, LRU 퇴출 순서, U/topShare/newRatio, Space-Saving 상위20 중 18+ 포착.
+- 다음: M4 베이스라인.
