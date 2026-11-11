@@ -32,3 +32,7 @@
 - `cms.ts`(4×65,536 uint16 × 6분 링, 보수적 갱신), `tracked.ts`(슬랩 10초×90 버킷, 일괄 퇴출), `hot.ts`(작성자 16분 비트마스크·최근 글·post-ID·링크/언어), `spacesaving.ts`(p: top-k 20,000, 분 링 30, 일괄 퇴출).
 - 테스트 10건 추가(누적 31): CMS 과소추정 0·평균오차<0.5, LRU 퇴출 순서, U/topShare/newRatio, Space-Saving 상위20 중 18+ 포착.
 - 다음: M4 베이스라인.
+### M4 — 베이스라인·저장소·prior ✅
+- `baseline.ts`(EWMA μ·v, bias 보정, λ·V5, φ 추정, prior φ→v 변환), `store.ts`(인터페이스+메모리), `idbStore.ts`(IndexedDB, 실패 시 빈 저장소로 강등, 6만 건 상한 정리), `prior.ts`(v1 형식 파싱·직렬화).
+- 테스트 10건 추가(누적 41). 엔진 안에서의 적용(5분 지연·hourFactor 탈계절화·prior 60분 가중)은 M5 엔진에 들어간다.
+- 다음: M5 신호·점수·게이트 + 시나리오 7개.
