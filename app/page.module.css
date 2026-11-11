@@ -14,8 +14,19 @@
 /* 기록계 — 차트가 height:100% 체인으로 받으므로 반드시 정해진 높이 */
 .pulse {
   flex: none;
-  height: 340px;
+  height: 430px;
   border-bottom: 1px solid var(--rule);
+}
+
+/* 머리줄을 세로로 — 제목 아래 게이지 2×2(Gauges의 컨테이너 쿼리) */
+.pulse > header {
+  container-type: inline-size;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pulse > header > :first-child {
+  width: auto;
 }
 
 .pulse > div:last-child {

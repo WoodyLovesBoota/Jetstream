@@ -28,32 +28,33 @@ description: Jetstream Deck 변경을 실제 브라우저에서 구동해 검증
   `lib/jetstream/useStreamWorker.ts`의 dev 블록이 제공. (P1의 1Hz 콘솔 로그는 P2에서 제거됨)
 - HUD(P2, R1에서 플로팅 → 우측 컬럼 하단 고정): `aside[aria-label="diagnostics"]`의
   `dd` 노드들 — 순서대로
-  recv/s, proc/s, drop/s, **cols 10s**, tokens, tok evict, tok drop, snap(ms), frame p95(ms), ws(=`dd`[9]).
+  recv/s, proc/s, drop/s, **cols 10s**, tracked(트렌드 추적 후보/상한), evict, bots(뮤트 DID), snap(ms), frame p95(ms), ws(=`dd`[9]).
+  HUD는 이제 진단 패널(`#inspector`, 기본 접힘) 안에 있다.
   (P8에서 `cols 10s`가 인덱스 3에 끼어들어 그 뒤가 한 칸씩 밀렸다.)
   rAF 루프가 textContent를 직접 갱신하므로 값 변화 관찰은 두 시점 텍스트 비교로 한다.
   ws 값 노드에는 `data-state`도 붙고, 뒤에 붙는 초는 상태에 따라 다른 것을 가리킨다 —
   `live/replaying`이면 마지막 이벤트의 지연, `reconnecting/failed`면 다음 시도까지 남은 대기.
   현재 인스턴스는 별도 행이 아니라 HUD 제목 줄의 `[data-instance]`에 있다(예: `js2.us-east`).
 - 메인 스레드 부하: `PerformanceObserver({ entryTypes: ["longtask"] })`로 롱태스크 카운트 (기대값 0).
-- Surge(P5 → R3/R4 재설계): `globalThis.__jetstream.surge` =
-  `{surging[≤10], sustained[≤10], baselineWarmup: {active, elapsedSec}, tuning, lastResortSec}`.
-  각 항목은 `{token, count1m, count5m, count15m, mult, spark[30], rankDelta(null=신규), lifecycle}`.
-  **불변식**: count1m ≤ count5m ≤ count15m, Σspark === count15m, spark 길이 30.
-  `.surgeStats` = `{tracked, cap, active, evicted, dropped, ttlSec}`은 그대로.
-  - **재정렬 주기**: 리스트 순서는 `lastResortSec`이 바뀌는 틱에서만 바뀌어야 한다
-    (기본 5초 간격). 스코어·카운트는 스냅샷마다 갱신된다.
-  - **워밍업**: 세션 첫 120초는 `baselineWarmup.active === true`이고 `surging`이 비어
-    있어야 하며(급상승 탭에 "베이스라인 학습 중" 문구), `sustained`는 정상 동작.
-  - **체류**: 리스트에 들어온 토큰은 30초(tuning.minDwellSec) 안에 사라지면 안 된다
-    (데이터 소멸 제외 — 최초 채움 항목 포함).
-  - **DOM**: `section[aria-label="Surge"]`의 `[role="tab"]` 2개(급상승/지속),
-    `li[data-filled="true"]` 행(`data-token`, `data-life`, style.transform=translateY(순위×40px),
-    transition 400ms — FLIP은 같은 li 노드가 transform만 바꾸는 것으로 확인).
-  - **튜닝 패널(dev)**: "t" 키 토글 → `aside[aria-label="Surge tuner"]`, 입력 7개.
-    콘솔에서는 `__jetstreamDebug.surgeTune({deadbandPct: 0, ...})`. 적용값은
-    스냅샷 `surge.tuning`으로 되돌아온다(세션 한정).
-  - 소크: 지속 유입에서 `tracked`가 `cap`(50k) 아래에서 안정화되고 `evicted`가
-    증가하며 `dropped`는 0에 머무는지 확인 — 상한 안정화의 실측 근거.
+- 트렌드 엔진(src/trend/, 구 Surge 대체): `globalThis.__jetstream.trend`는 5초 점수 패스가 돈
+  틱에만 실리고 나머지는 `null` — 최신 것은 `useStreamWorker.latestTrend()`가 들고 있다.
+  `{events[≤15], spreading[≤20], learning: {active, minutes, hasPrior}, stats}`. 이벤트는
+  `{id, colorIdx, state(active|past), title, titleKind, members[], related[], score, lifecycle(rising|peak|fading),
+  spark[30], representativePosts[], link, stats{mult,u,newRatio,a,isNew}, langs[]}`.
+  `.trendStats`(1Hz) = `{tracked, trackedCap(30k), hot, engage, trackedEvicted, muted, approxBytes, scoreMs, …}`,
+  `.trendStatus` = `{state(loading|ready), prior(loaded|missing|error), memoryRecords, fixture}`, `.pings`(참여 핑).
+  - **prior**: 정상이면 `trendStatus.prior === "loaded"`, `trend.learning.active === false`. prior가 없으면
+    첫 10분은 `learning.active`이고 진입이 막힌다(HUD pill에 "학습 중 n분").
+  - **불변식**: 활성 이벤트 제목 멤버가 배경어 단어(`w:` ∈ D)인 경우 0. p:(좋아요 몰린 글)만으로 된
+    이벤트는 없다(퍼지는 글 탭 전용).
+  - 프로덕션에서도 `globalThis.__swarm.stats()`(커서 수·이벤트별 커서·카드)와 `.status()`가 있다.
+- 스웜 UI(components/swarm/): `.sw-card[data-event-id][data-state][data-life][data-built][data-size]`,
+  `.sw-cursor`(≤150), 탭 `[role="tab"]` 2개(이벤트/퍼지는 글), 상세 서랍 `.sw-drawer`, HUD pill `.hud-pill`,
+  진단 패널 `#inspector`(툴바 "진단" 버튼, ≤900px에선 숨김).
+  - **픽스처 모드** `?fixture=news`: 네트워크 없이 카드 3개가 접속 직후 그려지고(built false→true),
+    ~30초 뒤 `#worldcupfinal`, ~1분 뒤 `東京 地震`, `#aurora`는 식다가 2~3분 안에 past로 흐려진다.
+    e2e(`pnpm test:e2e`)가 이 흐름을 검증한다.
+  - reduced-motion이면 커서 0, 카드 즉시 built.
 
 - Gauges(R2): `globalThis.__jetstream.gauges` = `{sec, stats: {post|like|repost|follow:
   {partial, ema, p95, avg60}}}`. DOM은 `section[aria-label="Gauges"] [data-type]` 셀 4개 —
@@ -110,13 +111,11 @@ description: Jetstream Deck 변경을 실제 브라우저에서 구동해 검증
   - **집계 방식**: HUD의 rAF 루프가 프레임 간격을 매 틱, 스냅샷 실측 카운터를 벽시계
     초마다 `lib/perf/measurement.ts`의 레코더에 먹인다. 60초마다 창을 닫아
     `recvPerSec/procPerSec/dropPerSec`의 min·p50·avg·p95·max, `frameMs`의 p50·p95·p99·max·n,
-    `degraded`(초 수·비율·maxM·maxLoadPct·maxLagMs), `caps`(surge tracked/evict/drop 델타,
+    `degraded`(초 수·비율·maxM·maxLoadPct·maxLagMs), `caps`(trend tracked/evict/muted 델타·bytes·scoreMs,
     tape stride)를 산출한다. `export()`는 진행 중인 창까지 포함해 돌려준다.
   - 창 롤오버는 `performance.now()` 기준이라 **CPU 스로틀링에 영향받지 않는다**(60초는 실제 60초).
   - 프레임 표본은 2s 이상 간격만 제외한다(rAF가 통째로 디스케줄된 구간). 탭 백그라운딩은
     HUD가 `visibilitychange`에서 리셋해 애초에 표본에 들어오지 않는다.
-  - `export().tuning`은 워커가 **실제 적용 중인** Surge 튜닝값이고, 세션 중 바뀌면
-    `tuningChanged: true`가 된다 — 튜닝 대조 실험의 증거로 쓴다.
 
 - 상태 오버레이(P9, `components/DeckStatus.tsx`): `[role="status"][data-mode]` —
   `connecting`(최초 연결 전 빈 상태) / `failed`(지속 장애 에러 상태) **두 상태에서만** 뜬다.

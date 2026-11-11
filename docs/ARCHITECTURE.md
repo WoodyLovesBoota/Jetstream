@@ -1,5 +1,7 @@
 # Jetstream Deck — 설계 문서
 
+> **2026-11 갱신:** Surge(토큰 빈도 랭킹, `lib/jetstream/surge.ts`)는 트렌드 판별 엔진(`src/trend/`)과 스웜 UI(`components/swarm/`)로 대체됐다. 아래 Surge 절은 당시 설계 기록으로 남긴다. 현재 설계·지표는 [docs/trend-engine/](trend-engine/FINAL_REPORT.md)을 볼 것.
+
 브라우저 단독으로 Bluesky Jetstream(공개 WebSocket 파이어호스, 무인증)을 구독해,
 Web Worker에서 수신·파싱·집계하고 메인 스레드는 10Hz 스냅샷을 rAF로 그리는
 단일 화면 실시간 대시보드.

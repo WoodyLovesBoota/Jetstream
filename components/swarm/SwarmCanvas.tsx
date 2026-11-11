@@ -74,9 +74,14 @@ export default function SwarmCanvas() {
     const hydTimer = window.setInterval(() => void hydrator?.tick(), 1_000);
 
     // e2e·디버그 관찰 핸들 — 프로덕션에서도 읽기 전용 통계만
-    (globalThis as Record<string, unknown>).__swarm = { stats: () => ctl.stats() };
+    let lastStatus: unknown = null;
+    (globalThis as Record<string, unknown>).__swarm = {
+      stats: () => ctl.stats(),
+      status: () => ({ trend: lastStatus, learning: latestTrend()?.learning ?? null }),
+    };
 
     const unsub = subscribeStream((s) => {
+      lastStatus = s.trendStatus;
       if (s.trend !== null) {
         ctl.setTrend(s.trend);
         redrawSpreading();

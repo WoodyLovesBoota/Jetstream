@@ -71,3 +71,9 @@
 - **홀드아웃(앞 30분으로 prior → 뒤 30분 리플레이)**: 진입 이벤트 5건/30분(시간당 10), 상위 10 배경어 비율 **0**, 점수 패스 p50 3.2ms·p95 3.9ms, 처리량 15만 ev/s(Node), 엔진 추정 19.5MB. → `docs/trend-engine/replay-holdout.json`
 - **주입(탐지 지연)**: 실녹화+prior — 분당 12건 115초, 24건 45초, 48건 30초(2분 이내), 6건 170초 / 봇(6계정 400건) **미탐지**. 합성 배경 — 12건 86초, 24건 51초, 48건 26초, 6건 186초, 봇 미탐지. → `docs/trend-engine/inject-*.json`
 - 테스트 누적 115건.
+### M10~M12 — 스웜 UI 마무리·e2e·정리 ✅
+- 초타원 공전(카드 모서리 회피), 3열 배치 보정, 진단 패널 게이지 컨테이너 쿼리 2×2.
+- e2e 9/9(Playwright, 프로덕션 빌드 + 픽스처): 로드·콘솔 에러 0, 커서가 카드를 그림·모임, 새 이벤트 그리기, 식는 이벤트 흩어짐, 상세 서랍, 퍼지는 글, reduced-motion, 900/390px, long task 0, 스크린샷 4장.
+- verify 스킬 라이브 검증(dev :3010, 실제 Jetstream): prior loaded·학습 아님, Mix 합계 불변식, Pause 동결, degraded 진입(M=3)·복귀, long task 0, 콘솔 에러 0, 프레임당 33µs·부하 2%.
+- 정리: README·verify 스킬·설계 문서 머리말, FINAL_REPORT.md.
+- 최종 게이트: typecheck 0 / lint 0 error(기존 경고 1) / unit 117 / build OK / e2e 9.

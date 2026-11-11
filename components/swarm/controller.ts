@@ -22,7 +22,7 @@ import {
   clamp,
   dragEase,
   DT_MAX,
-  orbitTarget,
+  orbitRectTarget,
   pathPoint,
   repel,
   smoother,
@@ -371,16 +371,16 @@ export class SwarmController {
   private setOrbit(c: Cur, card: Card): void {
     const r = card.rect;
     if (r === null) return;
-    // 호흡(−18%)·세로 찌그러짐(0.82)을 거쳐도 카드 가장자리 밖에 머물도록 반경을 역산한다
-    c.rx = (r.w / 2 + rand(12, 56)) / 0.82;
-    c.ry = (r.h / 2 + rand(14, 52)) / (0.82 * 0.82);
+    // 호흡(−18%)을 거쳐도 카드 가장자리 밖에 머물도록 반경을 역산한다(초타원 궤도)
+    c.rx = (r.w / 2 + rand(10, 46)) / 0.82;
+    c.ry = (r.h / 2 + rand(12, 44)) / 0.82;
     // 큰 카드일수록 각속도를 낮춰 선속도를 레퍼런스 수준으로 맞춘다
     c.spin = Math.sign(c.spin || 1) * rand(0.9, 1.7) * (110 / Math.max(110, (c.rx + c.ry) / 2));
   }
 
   private orbitPoint(c: Cur, card: Card): Pt {
     const r = card.rect as CardRect;
-    return orbitTarget(r.x + r.w / 2, r.y + r.h / 2, c.rx, c.ry, c.phase, c.spin, this.time, { x: 0, y: 0 });
+    return orbitRectTarget(r.x + r.w / 2, r.y + r.h / 2, c.rx, c.ry, c.phase, c.spin, this.time, { x: 0, y: 0 });
   }
 
   /** like·repost 핑 → 이벤트 카드 위 클릭 링 */
@@ -746,7 +746,7 @@ export class SwarmController {
           return;
         }
         const r = card.rect;
-        orbitTarget(r.x + r.w / 2, r.y + r.h / 2, c.rx, c.ry, c.phase, c.spin, this.time, this.tmp);
+        orbitRectTarget(r.x + r.w / 2, r.y + r.h / 2, c.rx, c.ry, c.phase, c.spin, this.time, this.tmp);
         springStep(c, this.tmp.x, this.tmp.y, dt);
         return;
       }

@@ -77,6 +77,30 @@ export function orbitTarget(
   return out;
 }
 
+/**
+ * 카드(직사각형) 둘레 공전 목표 — 초타원 |x/rx|^8 + |y/ry|^8 = 1. 타원은 모서리에서 카드
+ * 안으로 파고들지만 초타원은 모서리까지 감싼다. 반경 호흡 ±18%는 레퍼런스 그대로이고,
+ * 호출자는 숨을 다 들이쉰(0.82) 반경이 카드 가장자리 밖이 되게 rx·ry를 준다.
+ */
+export function orbitRectTarget(
+  cx: number,
+  cy: number,
+  rx: number,
+  ry: number,
+  phase: number,
+  spin: number,
+  t: number,
+  out: Pt,
+): Pt {
+  const a = phase + t * spin;
+  const breath = 1 + 0.18 * Math.sin(t * 1.3 + phase * 2);
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  out.x = cx + Math.sign(c) * Math.pow(Math.abs(c), 0.25) * rx * breath;
+  out.y = cy + Math.sign(s) * Math.pow(Math.abs(s), 0.25) * ry * breath;
+  return out;
+}
+
 /** 글자당 타이핑 간격(초) — 35~75ms, 공백 +0~40ms, 3% 확률 +100~250ms, 길이 정규화 k=clamp(46/n, .12, 1) */
 export function typeDelay(ch: string, len: number, r: () => number): number {
   let d = 0.035 + r() * 0.04;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { layoutCards, DEFAULT_LAYOUT } from "./layout";
-import { bendAmount, dragEase, orbitTarget, pathPoint, repel, smoother, springStep, travelTime, typeDelay } from "./motion";
+import { bendAmount, dragEase, orbitRectTarget, orbitTarget, pathPoint, repel, smoother, springStep, travelTime, typeDelay } from "./motion";
 
 describe("스웜 모션 수식 (레퍼런스 수치)", () => {
   it("이동 시간 = min(1, 0.16 + √d·0.019) / speed", () => {
@@ -52,6 +52,20 @@ describe("스웜 모션 수식 (레퍼런스 수치)", () => {
     }
   });
 
+  it("카드 둘레 초타원 공전: 숨을 다 들이쉬어도 카드(200×100) 밖", () => {
+    const o = { x: 0, y: 0 };
+    const rx = (100 + 10) / 0.82;
+    const ry = (50 + 10) / 0.82;
+    for (let a = 0; a < Math.PI * 2; a += 0.01) {
+      // breath 최소 0.82가 되는 시각을 고정해 각도만 돌린다
+      const phase = a;
+      const t = (-Math.PI / 2 - phase * 2) / 1.3;
+      orbitRectTarget(0, 0, rx, ry, phase, 0, t, o);
+      const inside = Math.abs(o.x) < 100 && Math.abs(o.y) < 50;
+      expect(inside).toBe(false);
+    }
+  });
+
   it("타이핑 간격은 길이로 정규화된다", () => {
     const r = () => 0.5;
     expect(typeDelay("a", 10, r)).toBeCloseTo(0.055);
@@ -81,6 +95,14 @@ describe("카드 배치", () => {
       }
     for (const r of rects) expect(r.x + r.w).toBeLessThanOrEqual(1200 - DEFAULT_LAYOUT.pad + 0.001);
     expect(height).toBeGreaterThan(0);
+  });
+
+  it("3열이면 1위 L 뒤 전부 S — 오른쪽 열이 비지 않는다", () => {
+    const items = [1, 2, 3, 4].map((id) => ({ id, past: false }));
+    const { rects } = layoutCards(items, { ...DEFAULT_LAYOUT, width: 1000 });
+    expect(rects.map((r) => r.size)).toEqual(["L", "S", "S", "S"]);
+    const rightCol = Math.max(...rects.map((r) => r.x));
+    expect(rects.filter((r) => r.x === rightCol).length).toBeGreaterThanOrEqual(2);
   });
 
   it("좁은 화면(≤900px)에선 1~2열로 접힌다 — 가로 넘침 없음", () => {

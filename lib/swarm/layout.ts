@@ -58,8 +58,10 @@ export function layoutCards(items: readonly LayoutInput[], o: LayoutOptions): { 
   for (const it of items) {
     let size: CardSize = "S";
     if (!it.past) {
+      // 열 수에 따라 빈칸이 안 생기게: 4열+ L·M·M, 3열 L 뒤 전부 S(남는 1열을 S가 채운다), 2열 1위만 M
       if (activeRank === 0 && cols >= 3) size = "L";
-      else if (activeRank <= 2 && cols >= 2) size = "M";
+      else if (activeRank === 0 && cols === 2) size = "M";
+      else if (activeRank <= 2 && cols >= 4) size = "M";
       activeRank++;
     }
     const cw = size === "S" ? 1 : 2;
