@@ -25,3 +25,6 @@
 ### M1 — 후보 추출 ✅
 - `src/trend/{config,hash,url,korean,extract}.ts`. 테스트 17건(영·한·중·일, bigram 경계, 짝, URL 정규화, slimEvent).
 - typecheck/lint(기존 경고 1) 통과. 다음: M2 중복 제거·봇.
+### M2 — 중복 제거·봇 ✅
+- `src/trend/dedup.ts` (`AuthorDedup`): 분 단위 (DID,후보) 32비트 Set, 분당 post>20 → 10분 뮤트, 참여는 분당 60 문턱. 테스트 4건(봇 태그 6계정 → 30회 상한 포함).
+- 다음: M3 카운터.
