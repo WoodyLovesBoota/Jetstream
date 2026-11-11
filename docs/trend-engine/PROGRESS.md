@@ -64,3 +64,10 @@
 - `components/swarm/controller.ts`: 커서 풀 150, 샘플 post → 커서(이벤트 색·라벨, 무소속은 일부만 흐리게 떠돌다 퇴장), 카드 생성 시 커서가 좌상단→우하단 드래그로 clip-path를 열고(선택 박스+크기 배지) 다른 커서가 I-beam으로 제목 타이핑, 공전 군집(스프링·반발), 밀도 보충(목표 = U/5), 식는 이벤트 도착 절반·공전 수명 단축, 퇴출 시 흩어짐, 참여 핑 클릭 링, 커서 히트 테스트 미리보기, 카드 상세 서랍.
 - `Toolbar`(연결·필터·Pause·아바타 스택·진단 토글), `HudPill`, `Shell`(접는 진단 패널 — 기존 Pulse·Gauges·Tape·Mix·HUD를 밝은 시트로), 탭(이벤트/퍼지는 글 + getPosts 하이드레이터 연결), 전역 `app/swarm.css`(다크 크롬 토큰, Inter).
 - 픽스처 모드에서 실브라우저 확인: 카드 3개가 커서에 의해 그려지고 공전, 콘솔 에러 0.
+### M9 — 녹화·리플레이·prior·주입 ✅
+- 실녹화: `scripts/record.ts`로 **60분, 1,403,680 이벤트**(2026-11-11 12:48~13:48 UTC 전후, post ≈3,000/분), 80MB gz (커밋 안 함).
+- `scripts/replay.ts`(--from/--minutes/--prior/--speed/--out), `src/trend/harness.ts`(지표 집계), `scripts/build-prior.ts`(1패스 μ·φ·D·언어 점유율, 24h 이상이면 2패스 hourFactor — `hourFactorFrom` 단위 테스트), `scripts/inject.ts`(녹화본/합성 배경 + 단어 4종·봇 주입).
+- `public/prior.json`: 60분 녹화로 생성 — 후보 5,000, 배경어 300, 언어 26, 151KB / **gzip 49.9KB**, hourFactor 없음(녹화 1시간). `scripts/prior-file.test.ts`로 형식·예산·엔진 로드 검증.
+- **홀드아웃(앞 30분으로 prior → 뒤 30분 리플레이)**: 진입 이벤트 5건/30분(시간당 10), 상위 10 배경어 비율 **0**, 점수 패스 p50 3.2ms·p95 3.9ms, 처리량 15만 ev/s(Node), 엔진 추정 19.5MB. → `docs/trend-engine/replay-holdout.json`
+- **주입(탐지 지연)**: 실녹화+prior — 분당 12건 115초, 24건 45초, 48건 30초(2분 이내), 6건 170초 / 봇(6계정 400건) **미탐지**. 합성 배경 — 12건 86초, 24건 51초, 48건 26초, 6건 186초, 봇 미탐지. → `docs/trend-engine/inject-*.json`
+- 테스트 누적 115건.

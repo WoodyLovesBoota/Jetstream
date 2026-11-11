@@ -11,7 +11,7 @@ import { writeFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { replay } from "../src/trend/harness.ts";
 import { extractKeys } from "../src/trend/extract.ts";
-import { serializePrior, type Prior, type PriorEntry } from "../src/trend/prior.ts";
+import { hourFactorFrom, serializePrior, type Prior, type PriorEntry } from "../src/trend/prior.ts";
 import { readRecording } from "./replay.ts";
 
 function arg(name: string, fallback: string | null = null): string | null {
@@ -76,16 +76,9 @@ async function main(): Promise<void> {
       }
     }
     for (const [k, arr] of perHour) {
-      const shares = Array.from(arr, (c, h) => (postsHour[h] > 0 ? c / postsHour[h] : 0));
-      const mean = shares.reduce((a, b) => a + b, 0) / 24;
-      if (mean <= 0) continue;
-      // 이웃 시각과 섞어(1:2:1) 잡음을 줄이고 [0.2, 5]로 자른다
-      const hf = shares.map((_, h) => {
-        const s = (shares[(h + 23) % 24] + 2 * shares[h] + shares[(h + 1) % 24]) / 4;
-        return Math.min(5, Math.max(0.2, s / mean));
-      });
+      const hf = hourFactorFrom(arr, postsHour);
       const e = entries.get(k);
-      if (e !== undefined) e.hf = Float32Array.from(hf);
+      if (hf !== null && e !== undefined) e.hf = Float32Array.from(hf);
     }
   }
 

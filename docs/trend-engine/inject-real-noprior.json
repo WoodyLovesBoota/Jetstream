@@ -1,0 +1,31 @@
+{
+  "background": "recordings/live-60m.jsonl.gz",
+  "prior": false,
+  "injectAtMin": 15,
+  "detection": [
+    {
+      "perMin": 6,
+      "detected": true,
+      "latencySec": 180
+    },
+    {
+      "perMin": 12,
+      "detected": true,
+      "latencySec": 90
+    },
+    {
+      "perMin": 24,
+      "detected": true,
+      "latencySec": 50
+    },
+    {
+      "perMin": 48,
+      "detected": true,
+      "latencySec": 25
+    }
+  ],
+  "botDetected": false,
+  "top10BackgroundRatio": 0,
+  "eventsPerHour": 75,
+  "eventsPerSec": 157268
+}

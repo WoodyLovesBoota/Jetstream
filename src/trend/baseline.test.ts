@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { biasFactor, ewmaUpdate, expectation, phiFrom, vFromPhi } from "./baseline.ts";
 import { alphaFromHalfLife } from "./config.ts";
-import { parsePrior, serializePrior } from "./prior.ts";
+import { hourFactorFrom, parsePrior, serializePrior } from "./prior.ts";
 import { MemoryStore } from "./store.ts";
 
 describe("EWMA 베이스라인", () => {
@@ -74,6 +74,19 @@ describe("prior", () => {
     const p = parsePrior(JSON.parse(JSON.stringify(file)));
     expect(p?.entries.get("w:sunrise")?.hf?.[3]).toBe(5);
     expect(p?.background).toEqual(["trump"]);
+  });
+
+  it("hourFactor: 정오에만 몰리는 단어는 정오 배수가 크고 평균은 ≈1", () => {
+    const posts = new Array(24).fill(1000);
+    const mentions = new Array(24).fill(2);
+    mentions[12] = 20;
+    const hf = hourFactorFrom(mentions, posts);
+    expect(hf).not.toBeNull();
+    const h = hf ?? [];
+    expect(h[12]).toBeGreaterThan(3);
+    expect(h[3]).toBeLessThan(1);
+    expect(h.every((x) => x >= 0.2 && x <= 5)).toBe(true);
+    expect(hourFactorFrom(new Array(24).fill(0), posts)).toBeNull();
   });
 
   it("깨진 prior는 null", () => {

@@ -1,0 +1,31 @@
+{
+  "background": "synthetic(1500 posts/min)",
+  "prior": false,
+  "injectAtMin": 20,
+  "detection": [
+    {
+      "perMin": 6,
+      "detected": true,
+      "latencySec": 186
+    },
+    {
+      "perMin": 12,
+      "detected": true,
+      "latencySec": 86
+    },
+    {
+      "perMin": 24,
+      "detected": true,
+      "latencySec": 51
+    },
+    {
+      "perMin": 48,
+      "detected": true,
+      "latencySec": 26
+    }
+  ],
+  "botDetected": false,
+  "top10BackgroundRatio": 0,
+  "eventsPerHour": 10,
+  "eventsPerSec": 78021
+}

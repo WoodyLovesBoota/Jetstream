@@ -59,13 +59,16 @@ async function main(): Promise<void> {
   let t0: number;
   let background: AsyncIterable<SlimEvent>;
   if (file !== null) {
+    // --from N: 녹화본 앞 N분을 건너뛴다(그 구간으로 prior를 만들었다면 겹치지 않게)
+    const fromMin = Number(arg("from", "0"));
     const it = readRecording(file);
     const first = await it.next();
     if (first.done === true) throw new Error("empty recording");
-    t0 = first.value.t / 1000;
+    t0 = first.value.t / 1000 + fromMin * MIN;
+    const start = t0;
     background = (async function* () {
-      yield first.value as SlimEvent;
-      yield* it;
+      if ((first.value as SlimEvent).t / 1000 >= start) yield first.value as SlimEvent;
+      for await (const ev of it) if (ev.t / 1000 >= start) yield ev;
     })();
   } else {
     t0 = Date.UTC(2026, 10, 11, 12);

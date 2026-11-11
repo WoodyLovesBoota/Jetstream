@@ -92,3 +92,17 @@ export function serializePrior(p: Prior): PriorFile {
   }
   return out;
 }
+
+/**
+ * UTC 시각별 언급 수·post 수 → hourFactor(평균 1). 이웃 시각과 1:2:1로 섞어 잡음을 줄이고
+ * [0.2, 5]로 자른다. 하루 평균 점유율이 0이면 null. (build-prior가 24시간 이상 녹화에서 쓴다)
+ */
+export function hourFactorFrom(mentions: ArrayLike<number>, posts: ArrayLike<number>): number[] | null {
+  const shares = Array.from({ length: 24 }, (_, h) => (posts[h] > 0 ? mentions[h] / posts[h] : 0));
+  const mean = shares.reduce((a, b) => a + b, 0) / 24;
+  if (!(mean > 0)) return null;
+  return shares.map((_, h) => {
+    const sm = (shares[(h + 23) % 24] + 2 * shares[h] + shares[(h + 1) % 24]) / 4;
+    return Math.min(5, Math.max(0.2, sm / mean));
+  });
+}

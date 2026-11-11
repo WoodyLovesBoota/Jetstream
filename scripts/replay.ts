@@ -82,12 +82,14 @@ async function main(): Promise<void> {
     console.error("[replay] empty recording");
     process.exit(1);
   }
-  const t0 = first.value.t / 1000;
+  // --from N: 앞 N분을 건너뛰고 시작(홀드아웃 평가 — prior를 만든 구간과 겹치지 않게)
+  const fromMin = Number(arg("from", "0"));
+  const t0 = first.value.t / 1000 + fromMin * 60_000;
   if (minutes > 0) untilMs = t0 + minutes * 60_000;
   if (flag("skip-learning")) measureFromMs = t0 + 10 * 60_000;
   async function* all(): AsyncGenerator<SlimEvent> {
-    yield first.value as SlimEvent;
-    yield* src;
+    if (first.value !== undefined && (first.value as SlimEvent).t / 1000 >= t0) yield first.value as SlimEvent;
+    for await (const ev of src) if (ev.t / 1000 >= t0) yield ev;
   }
   let heapMax = 0;
   const { report, engine } = await replay(all(), {

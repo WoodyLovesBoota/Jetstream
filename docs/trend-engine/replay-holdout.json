@@ -1,0 +1,123 @@
+{
+  "file": "recordings/live-60m.jsonl.gz",
+  "prior": {
+    "createdAt": "2026-11-11T14:18:51.600Z",
+    "entries": 5000
+  },
+  "events": 707744,
+  "posts": 87710,
+  "engages": 620034,
+  "spanMin": 30,
+  "eventsPerSec": 150584,
+  "top10BackgroundRatio": 0,
+  "snapshotsWithBackgroundInTop10": 0,
+  "entered": [
+    {
+      "t": 1794407222000,
+      "id": 1,
+      "title": "Tech’s pivot to the left. \n\n“.. Nowhere is that hard pivot more on display than ",
+      "titleKey": "q:at://did:plc:z6rujpf4u56jfie7aqic2nfg/app.bsky.feed.post/3n225tptqis22",
+      "score": 36.8,
+      "members": [
+        "p:at://did:plc:z6rujpf4u56jfie7aqic2nfg/app.bsky.feed.post/3n225tptqis22",
+        "q:at://did:plc:z6rujpf4u56jfie7aqic2nfg/app.bsky.feed.post/3n225tptqis22"
+      ]
+    },
+    {
+      "t": 1794407567000,
+      "id": 2,
+      "title": "honor · sacrifice",
+      "titleKey": "c:honor|sacrifice",
+      "score": 6.3,
+      "members": [
+        "c:honor|sacrifice"
+      ]
+    },
+    {
+      "t": 1794408417000,
+      "id": 3,
+      "title": "additional details",
+      "titleKey": "b:additional details",
+      "score": 7.7,
+      "members": [
+        "b:additional details"
+      ]
+    },
+    {
+      "t": 1794408452000,
+      "id": 4,
+      "title": "글 3mzxzpcwdqs2i",
+      "titleKey": "q:at://did:plc:uclondubjjrducdtaiemaq3i/app.bsky.feed.post/3mzxzpcwdqs2i",
+      "score": 6.5,
+      "members": [
+        "q:at://did:plc:uclondubjjrducdtaiemaq3i/app.bsky.feed.post/3mzxzpcwdqs2i"
+      ]
+    },
+    {
+      "t": 1794408467000,
+      "id": 5,
+      "title": "글 3n2265gdjss2s",
+      "titleKey": "q:at://did:plc:7lvxwobg2zrzgwpepyzxxjev/app.bsky.feed.post/3n2265gdjss2s",
+      "score": 41.3,
+      "members": [
+        "p:at://did:plc:7lvxwobg2zrzgwpepyzxxjev/app.bsky.feed.post/3n2265gdjss2s",
+        "q:at://did:plc:7lvxwobg2zrzgwpepyzxxjev/app.bsky.feed.post/3n2265gdjss2s"
+      ]
+    }
+  ],
+  "eventsPerHour": 10,
+  "scoreMs": {
+    "p50": 3.23,
+    "p95": 3.89,
+    "max": 5.13
+  },
+  "approxBytesMax": 19485044,
+  "trackedMax": 7957,
+  "hotMax": 1426,
+  "engageMax": 19951,
+  "snapshots": 360,
+  "nodeHeapDeltaMaxMB": 178.4,
+  "approxMB": 19.5,
+  "background": [
+    "trump",
+    "work",
+    "vote",
+    "happy",
+    "veterans",
+    "help",
+    "read",
+    "hope",
+    "show",
+    "game",
+    "democrats",
+    "service",
+    "好き",
+    "free",
+    "house",
+    "con",
+    "live",
+    "another",
+    "support",
+    "country",
+    "stop",
+    "part",
+    "end",
+    "home",
+    "november",
+    "job",
+    "dems",
+    "money",
+    "point",
+    "playing",
+    "may",
+    "news",
+    "since",
+    "start",
+    "republicans",
+    "change",
+    "story",
+    "hegseth",
+    "family",
+    "open"
+  ]
+}
