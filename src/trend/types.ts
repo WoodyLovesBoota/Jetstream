@@ -62,6 +62,8 @@ export interface TrendEvent {
 export interface SpreadingPost {
   uri: string;
   url: string | null;
+  /** 세션 중 본 글이면 본문 앞 140자, 아니면 null(UI가 getPosts로 채운다) */
+  text: string | null;
   score: number;
   /** 5분·30분 고유 참여자, 30분 가중 표(repost 3) */
   p5: number;

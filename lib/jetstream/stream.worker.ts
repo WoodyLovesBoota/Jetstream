@@ -4,6 +4,7 @@ import {
   GAUGE_COLLECTIONS,
   GAUGE_EMA_TAU_MS,
   GAUGE_STAT_WINDOW_SEC,
+  PINGS_PER_SNAPSHOT,
   RING_SECONDS,
   SNAPSHOT_INTERVAL_MS,
   TAPE_TARGET_ROWS_PER_SEC,
@@ -14,10 +15,18 @@ import {
   type SecondBucket,
   type StreamSnapshot,
   type TapeRow,
+  type TrendStats,
+  type TrendStatus,
 } from "./protocol";
 import { createBackpressure } from "./backpressure";
 import { createConnection } from "./connection";
-import { createSurgeAggregator } from "./surge";
+import { TrendEngine, type IngestInfo } from "../../src/trend/engine.ts";
+import { labelOf } from "../../src/trend/extract.ts";
+import { FIXTURES } from "../../src/trend/fixtures.ts";
+import { IdbStore } from "../../src/trend/idbStore.ts";
+import { parsePrior, type Prior } from "../../src/trend/prior.ts";
+import { slimEvent, toRawEvent, type SlimEvent } from "../../src/trend/slim.ts";
+import { synthStream } from "../../src/trend/synth.ts";
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -29,6 +38,7 @@ interface JetstreamEvent {
   commit?: {
     collection?: string;
     operation?: string;
+    rkey?: string;
     record?: {
       text?: string;
       langs?: string[];
@@ -181,8 +191,61 @@ let tapeBuffer: TapeRow[] = [];
 const tapeSampledRate = makeRateWindow();
 const tapeSkippedRate = makeRateWindow();
 
-// ── Surge: post 텍스트 토큰 버스트 감지 (산식·퇴출은 surge.ts) ────────
-const surge = createSurgeAggregator();
+// ── 트렌드 엔진 (src/trend/) ────────────────────────────────────────
+//
+// prior.json을 받은 뒤에 엔진을 만든다(보통 수십 ms). 그 전 이벤트는 트렌드 집계에만
+// 빠지고 나머지(게이지·Pulse·Mix·Tape)는 그대로 돈다. 평소 기억은 IndexedDB에서 불러와
+// 합치고, 엔진이 1분마다 내놓는 저장 대기열을 비동기로 쓴다 — 스트림 처리를 막지 않는다.
+let engine: TrendEngine | null = null;
+let store: IdbStore | null = null;
+const trendStatus: TrendStatus = { state: "loading", prior: "pending", memoryRecords: 0, fixture: null, skippedBeforeReady: 0 };
+let trendStatsCache: TrendStats | null = null;
+let trendStatsSec = -1;
+
+async function loadPrior(): Promise<Prior | null> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 4_000);
+  try {
+    const res = await fetch(new URL("/prior.json", self.location.origin), { signal: ctl.signal });
+    if (!res.ok) {
+      trendStatus.prior = "missing";
+      return null;
+    }
+    const prior = parsePrior(await res.json());
+    trendStatus.prior = prior === null ? "error" : "loaded";
+    return prior;
+  } catch (e) {
+    // 오프라인·타임아웃 — prior 없이 학습 모드로 시작한다
+    console.warn("[trend] prior.json load failed", e);
+    trendStatus.prior = "error";
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function initTrend(): Promise<void> {
+  if (engine !== null || trendStatus.fixture !== null) return;
+  const prior = await loadPrior();
+  if (trendStatus.fixture !== null) return; // 그 사이 픽스처 모드로 바뀌었다
+  engine = new TrendEngine({ nowMs: Date.now(), prior });
+  trendStatus.state = "ready";
+  store = new IdbStore();
+  const recs = await store.loadAll();
+  engine.loadMemory(recs);
+  trendStatus.memoryRecords = recs.length;
+}
+
+/** 후보 키 → 스웜 커서 이름 태그와 목적지 이벤트 */
+function tagFor(keys: readonly string[], did: string): { tag: string; eventId: number | null } {
+  const hit = engine?.eventFor(keys) ?? null;
+  if (hit !== null) return { tag: labelOf(hit.key).slice(0, 28), eventId: hit.eventId };
+  for (const prefix of ["h:", "b:", "w:"]) {
+    const k = keys.find((x) => x.startsWith(prefix) && !(prefix === "w:" && engine?.isBackground(x.slice(2)) === true));
+    if (k !== undefined) return { tag: labelOf(k).slice(0, 28), eventId: null };
+  }
+  return { tag: shortenDid(did).split(":").pop() ?? did, eventId: null };
+}
 
 function maybeUpdateStride(nowSec: number): void {
   if (strideUpdateSec === -1) {
@@ -222,13 +285,23 @@ function primaryLang(langs: unknown): string | null {
   return /^[a-z]{2,3}$/.test(primary) ? primary : null;
 }
 
-function buildTapeRow(ev: JetstreamEvent, timeUs: number): TapeRow {
+function buildTapeRow(ev: JetstreamEvent, timeUs: number, info: IngestInfo | null): TapeRow {
+  const fullDid = typeof ev.did === "string" ? ev.did : "";
+  const t = info !== null ? tagFor(info.keys, fullDid) : { tag: shortenDid(fullDid), eventId: null };
   return {
     timeUs,
-    did: typeof ev.did === "string" ? shortenDid(ev.did) : "",
+    did: shortenDid(fullDid),
     text: (ev.commit?.record?.text ?? "").slice(0, 200),
     langs: Array.isArray(ev.commit?.record?.langs) ? ev.commit.record.langs : [],
+    fullDid,
+    rkey: typeof ev.commit?.rkey === "string" ? ev.commit.rkey : "",
+    tag: t.tag,
+    eventId: t.eventId,
   };
+}
+
+function kind_isCommitCreate(ev: JetstreamEvent): boolean {
+  return ev.kind === "commit" && ev.commit?.operation === "create";
 }
 
 /** 프레임 1건의 파싱·집계 — 비용 측정 구간 안쪽이라 여기서 시간을 재면 안 된다 */
@@ -270,6 +343,17 @@ function processFrame(data: unknown): void {
   bucket.total++;
   procTotal++;
 
+  // 트렌드 엔진 — post·like·repost create만 SlimEvent가 된다. 링 버킷과 달리 엔진은
+  // 이벤트 시각(최대 15분 전까지)으로 넣는다: 리플레이가 갭을 원래 자리에 메운다.
+  let info: IngestInfo | null = null;
+  if (kind_isCommitCreate(ev)) {
+    const slim: SlimEvent | null = slimEvent(ev);
+    if (slim !== null) {
+      if (engine !== null) info = engine.ingest(slim, nowMs);
+      else trendStatus.skippedBeforeReady++;
+    }
+  }
+
   const kind = ev.kind;
   if (kind === "commit" || kind === "identity" || kind === "account") {
     bucket.kinds[kind]++;
@@ -290,17 +374,12 @@ function processFrame(data: unknown): void {
         else bucket.langs[lang] = (bucket.langs[lang] ?? 0) + 1;
 
         if (typeof ev.commit.record?.text === "string") {
-          // Surge는 stride 샘플링 전의 모든 post 텍스트를 본다 — 빈도가 곧 신호라서.
-          // 버킷과 달리 벽시계 초로 넣는다: Surge의 질문은 "지금 무엇이 뜨는가"이고,
-          // 갭 동안 쌓인 토큰은 복구된 지금 한꺼번에 반영되는 게 맞다.
-          surge.ingest(ev.commit.record.text, nowSec);
-
           postCandidatesTotal++;
           strideCounter++;
           if (strideCounter >= strideN) {
             strideCounter = 0;
             tapeSampledTotal++;
-            tapeBuffer.push(buildTapeRow(ev, timeUs));
+            tapeBuffer.push(buildTapeRow(ev, timeUs, info));
           } else {
             tapeSkippedTotal++;
           }
@@ -389,8 +468,24 @@ function takeSnapshot(): StreamSnapshot {
   const tapeRows = tapeBuffer;
   tapeBuffer = [];
 
-  const surgeSnapshot = surge.snapshot(nowSec);
-  const conn = connection.status();
+  // 트렌드: 5초 점수 패스가 돈 틱에만 스냅샷이 붙는다. 저장 대기열(1분)은 비동기로 쓴다.
+  const nowMs = Date.now();
+  const trend = engine?.tick(nowMs) ?? null;
+  if (engine !== null) {
+    const recs = engine.drainMemory();
+    if (recs.length > 0 && store !== null) void store.saveMany(recs);
+    if (nowSec !== trendStatsSec) {
+      trendStatsSec = nowSec;
+      trendStatsCache = engine.stats(engine.snapshot()?.stats.posts5m ?? 0);
+    }
+  }
+  const pings = engine?.drainPings(PINGS_PER_SNAPSHOT) ?? [];
+  const realConn = connection.status();
+  // 픽스처 모드엔 소켓이 없다 — 화면이 "끊김"으로 보이지 않게 live로 보고하고 인스턴스 자리에 이름을 싣는다
+  const conn =
+    trendStatus.fixture !== null
+      ? { ...realConn, state: "live" as const, instance: `fixture:${trendStatus.fixture}`, lagSec: 0, attempt: 0, retryInMs: 0 }
+      : realConn;
 
   return {
     ts: Date.now(),
@@ -415,8 +510,10 @@ function takeSnapshot(): StreamSnapshot {
       sampledPerSec: tapeSampledRate(tapeSampledTotal),
       skippedPerSec: tapeSkippedRate(tapeSkippedTotal),
     },
-    surge: surgeSnapshot.data,
-    surgeStats: surgeSnapshot.stats,
+    trend,
+    trendStats: trendStatsCache,
+    trendStatus: { ...trendStatus },
+    pings,
     gaps: connection.gaps(nowSec),
     backpressure: backpressure.stats(stallPerFrameUs > 0 && Date.now() < stallUntilMs),
     conn,
@@ -425,19 +522,50 @@ function takeSnapshot(): StreamSnapshot {
 }
 
 let snapshotTimer: ReturnType<typeof setInterval> | null = null;
-let lastSurgeSweepSec = -1;
 
 function startSnapshotLoop(): void {
   if (snapshotTimer !== null) return;
   snapshotTimer = setInterval(() => {
-    // Surge EMA·정리는 1Hz 배치 — 10Hz 스냅샷 루프에서 초가 바뀔 때만 실행
-    const nowSec = Math.floor(Date.now() / 1000);
-    if (nowSec !== lastSurgeSweepSec) {
-      lastSurgeSweepSec = nowSec;
-      surge.sweep(nowSec);
-    }
     self.postMessage(takeSnapshot());
   }, SNAPSHOT_INTERVAL_MS);
+}
+
+// ── 픽스처 스트림 모드 ────────────────────────────────────────────
+//
+// 소켓 대신 결정적 합성 스트림을 재생한다. 과거 이력(시나리오의 historyMs)은 엔진에만
+// 가상 시계로 즉시 흘려 평소를 만들고, 그 뒤 이벤트는 실시간으로 원시 JSON으로 바꿔
+// onFrame에 넣는다 — 게이지·Pulse·Mix·Tape·트렌드·백프레셔가 실제 수신과 같은 길을 탄다.
+let fixtureTimer: ReturnType<typeof setInterval> | null = null;
+
+function startFixture(name: string): void {
+  if (fixtureTimer !== null) return;
+  const scenario = FIXTURES[name] ?? FIXTURES.news;
+  trendStatus.fixture = name in FIXTURES ? name : "news";
+  trendStatus.prior = "missing";
+  const now = Date.now();
+  const opts = scenario.options(now);
+  const fx = new TrendEngine({ nowMs: opts.startMs, prior: null });
+  const gen = synthStream(opts);
+  let pending = gen.next();
+  let nextTick = opts.startMs + 1000;
+  while (pending.done !== true && pending.value.t / 1000 <= now) {
+    const t = pending.value.t / 1000;
+    while (nextTick <= t) {
+      fx.tick(nextTick);
+      nextTick += 1000;
+    }
+    fx.ingest(pending.value, t);
+    pending = gen.next();
+  }
+  engine = fx;
+  trendStatus.state = "ready";
+  fixtureTimer = setInterval(() => {
+    const limit = Date.now();
+    while (pending.done !== true && pending.value.t / 1000 <= limit) {
+      onFrame(JSON.stringify(toRawEvent(pending.value)));
+      pending = gen.next();
+    }
+  }, 50);
 }
 
 // ── 명령 처리 ────────────────────────────────────────────────────
@@ -447,6 +575,11 @@ self.onmessage = (e: MessageEvent<MainToWorker>) => {
   switch (msg.type) {
     case "connect":
       connection.start(msg.endpoints, msg.wantedCollections);
+      void initTrend();
+      startSnapshotLoop();
+      break;
+    case "fixture":
+      startFixture(msg.name);
       startSnapshotLoop();
       break;
     case "disconnect":
@@ -455,10 +588,6 @@ self.onmessage = (e: MessageEvent<MainToWorker>) => {
     case "setFilter":
       // 재연결하되 커서를 재사용한다 — 전환 구간이 비지 않고 갭도 남지 않는다
       connection.setFilter(msg.wantedCollections);
-      break;
-    case "surgeTune":
-      // 세션 한정 튜닝 — 적용된 실제 값은 스냅샷의 surge.tuning으로 되돌아간다
-      surge.tune(msg.tuning);
       break;
     case "debug":
       if (msg.action === "drop") {

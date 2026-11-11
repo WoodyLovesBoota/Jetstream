@@ -1,6 +1,10 @@
 // 워커 ↔ 메인 스레드 메시지 계약. postMessage로 오가는 값은 전부 여기 정의된
 // structured clone 가능한 plain 값뿐이다.
 
+import type { EngagePing, TrendSnapshot, TrendStats } from "../../src/trend/types.ts";
+
+export type { EngagePing, TrendSnapshot, TrendStats };
+
 /**
  * 공식 Jetstream 인스턴스 — us-east/us-west 각 2대. 재연결이 거듭 실패하면 이 순서로
  * 순환 페일오버한다(같은 리전 짝 → 반대 리전). `cursor`가 시간 기반이라 인스턴스가
@@ -49,48 +53,10 @@ export const TAPE_TARGET_ROWS_PER_SEC = 15;
 /** 메인 스레드가 보관하는 Tape 행의 상한 — 넘으면 오래된 행부터 폐기(링버퍼) */
 export const TAPE_MAX_ROWS = 2_000;
 
-// ── Surge 상수 (산식·안정화는 lib/jetstream/surge.ts) ────────────────
+// ── 트렌드 엔진 (src/trend/) ─────────────────────────────────────
 
-/** Surge: 토큰별 히스토리 버킷 폭(초) */
-export const SURGE_BUCKET_SEC = 10;
-
-/** Surge: 토큰별 히스토리 버킷 수 — 10초 × 90 = 15분 */
-export const SURGE_RING_BUCKETS = 90;
-
-/** Surge: 스파크라인 다운샘플 포인트 수 — 90버킷을 3개씩 묶어 30포인트(포인트당 30초) */
-export const SURGE_SPARK_POINTS = 30;
-
-/** Surge: 두 리스트(급상승·지속) 각각의 표시 항목 수 */
-export const SURGE_LIST_N = 10;
-
-/** Surge: 동시에 추적하는 토큰 수 상한 — 넘으면 신규 토큰은 드롭(카운터) */
-export const SURGE_MAX_TOKENS = 50_000;
-
-/** Surge: 베이스라인(분당 언급률 EMA)의 반감기(분) */
-export const SURGE_BASELINE_HALF_LIFE_MIN = 30;
-
-/** Surge: 세션 시작 후 이 시간(초) 동안은 베이스라인 미성숙 — 급상승 랭킹 비활성 */
-export const SURGE_WARMUP_SEC = 120;
-
-/** Surge 라이프사이클: 1분 rate ≥ 5분 rate × 이 값이면 "급등" */
-export const SURGE_RISING_RATIO = 1.3;
-
-/** Surge 라이프사이클: 1분 rate ≤ 5분 rate × 이 값이면 "하강" */
-export const SURGE_FALLING_RATIO = 0.7;
-
-/** Surge 라이프사이클: 리스트 첫 진입 후 이 시간(초) 안이면 "신규" */
-export const SURGE_NEW_SEC = 60;
-
-/** 튜닝 기본값 — 런타임에 surgeTune 명령으로 조절 가능(세션 한정) */
-export const SURGE_TUNING_DEFAULTS: SurgeTuning = {
-  alpha: 2,
-  minSupport: 30,
-  deadbandPct: 15,
-  minDwellSec: 30,
-  enterMult: 2.0,
-  exitMult: 1.4,
-  resortSec: 5,
-};
+/** 메인 스레드 → 워커 스냅샷 한 장에 싣는 참여 핑 상한 */
+export const PINGS_PER_SNAPSHOT = 32;
 
 /** 게이지 큰 숫자를 스무딩하는 EMA 시정수(ms) — "3초 EMA" */
 export const GAUGE_EMA_TAU_MS = 3_000;
@@ -326,80 +292,26 @@ export interface TapeRow {
   /** post 본문 앞 200자 */
   text: string;
   langs: string[];
+  /** 원문 링크용 — 전체 DID와 rkey */
+  fullDid: string;
+  rkey: string;
+  /** 스웜 커서 이름 태그 — 이 글이 건드리는 후보 라벨(이벤트 멤버 우선), 없으면 축약 DID */
+  tag: string;
+  /** 이 글이 속한 진입 이벤트 — 스웜 커서의 목적지. 무소속이면 null */
+  eventId: number | null;
 }
 
-/** Surge 튜닝 파라미터 — 워커가 실제로 적용 중인 값이 스냅샷에 실린다 */
-export interface SurgeTuning {
-  /** 라플라스 스무딩 α — 분당 언급 상당. burst = (rate5m + α) / (baseline + α) */
-  alpha: number;
-  /** 급상승 랭킹 진입에 필요한 최소 5분 언급 수 */
-  minSupport: number;
-  /** 인접 순위 간 스코어 차이가 이 % 미만이면 자리를 바꾸지 않는다 */
-  deadbandPct: number;
-  /** 리스트 진입 후 최소 체류(초) — 데이터가 소멸하지 않는 한 유지 */
-  minDwellSec: number;
-  /** 진입 문턱(배수) */
-  enterMult: number;
-  /** 퇴출 문턱(배수) — 진입보다 낮아 히스테리시스를 만든다 */
-  exitMult: number;
-  /** 랭킹 재정렬 주기(초) — 스코어 갱신은 계속되고 자리만 이 주기로 바뀐다 */
-  resortSec: number;
-}
-
-/**
- * 급등   1분 rate ≥ 5분 rate × SURGE_RISING_RATIO
- * 하강   1분 rate ≤ 5분 rate × SURGE_FALLING_RATIO
- * 신규   리스트 첫 진입 SURGE_NEW_SEC초 이내
- * 유지   나머지
- */
-export type SurgeLifecycle = "rising" | "falling" | "new" | "steady";
-
-/** Surge 리스트 한 항목. 산식은 lib/jetstream/surge.ts 참고 */
-export interface SurgeItem {
-  token: string;
-  /** 최근 1분/5분/15분 언급 수 — 10초 버킷 롤링 합 */
-  count1m: number;
-  count5m: number;
-  count15m: number;
-  /** burst 배수 = (rate5m + α) / (baseline + α). UI는 ×n.n로 표시한다 */
-  mult: number;
-  /** 15분 히스토리 — SURGE_SPARK_POINTS개(포인트당 30초 합), 오래된 것 → 최신 순 */
-  spark: number[];
-  /** 직전 재정렬 대비 순위 변동. 양수 = ▲칸수, 음수 = ▼, 0 = 유지, null = 신규 진입 */
-  rankDelta: number | null;
-  lifecycle: SurgeLifecycle;
-}
-
-export interface SurgeData {
-  /** 급상승 — burst 배수 내림차순. 자격·히스테리시스·데드밴드·최소 체류 적용 */
-  surging: SurgeItem[];
-  /**
-   * 지속 — 해시태그만, 15분 절대 언급량 내림차순 단순 top. 자격 조건·히스테리시스 없음.
-   * 볼륨 순위는 배경을 통계로 못 거르므로(상시어·지속 트렌드 모두 배수≈1) 의도적으로
-   * 붙인 해시태그로 한정한다. 단어 트렌드는 급상승(burst) 쪽이 담당한다.
-   */
-  sustained: SurgeItem[];
-  /** 세션 경과 SURGE_WARMUP_SEC 미만이면 active — 급상승 랭킹은 비활성이다 */
-  baselineWarmup: { active: boolean; elapsedSec: number };
-  /** 현재 적용 중인 튜닝 값 — UI 상태줄은 이 실설정값만 말한다 */
-  tuning: SurgeTuning;
-  /** 마지막 재정렬이 일어난 epoch 초 — 재정렬 주기의 외부 관측점 */
-  lastResortSec: number;
-}
-
-export interface SurgeStats {
-  /** 현재 추적 중인 토큰 수 */
-  tracked: number;
-  /** 추적 상한 (= SURGE_MAX_TOKENS) */
-  cap: number;
-  /** 윈도 빈도가 0이 아닌 활성 토큰 수 */
-  active: number;
-  /** 정리 패스가 퇴출한 토큰 누적 */
-  evicted: number;
-  /** 테이블 만석으로 추적하지 못하고 드롭한 신규 토큰 누적 */
-  dropped: number;
-  /** 정리 패스의 현재 적응형 TTL(초) — 점유율에 따라 조정된다 */
-  ttlSec: number;
+/** 트렌드 엔진 준비 상태 — prior·평소 기억 로드 결과 */
+export interface TrendStatus {
+  /** loading: prior를 받는 중(이 동안 이벤트는 트렌드 집계에 안 들어간다) */
+  state: "loading" | "ready";
+  prior: "pending" | "loaded" | "missing" | "error";
+  /** IndexedDB에서 불러온 평소 기억 레코드 수 */
+  memoryRecords: number;
+  /** 픽스처 모드면 시나리오 이름 */
+  fixture: string | null;
+  /** 엔진 준비 전에 들어와 트렌드 집계에서만 빠진 이벤트 수 */
+  skippedBeforeReady: number;
 }
 
 export interface TapeStats {
@@ -421,9 +333,16 @@ export interface StreamSnapshot {
   /** 직전 스냅샷 이후 새로 샘플링된 행만 — 오래된 것 → 최신 순 */
   tapeRows: TapeRow[];
   tapeStats: TapeStats;
-  /** 급상승·지속 리스트와 워밍업·튜닝 상태 */
-  surge: SurgeData;
-  surgeStats: SurgeStats;
+  /**
+   * 트렌드 엔진 스냅샷 — 5초 점수 패스가 돈 틱에만 실린다(그 외 null).
+   * 메인 스레드는 마지막으로 받은 것을 들고 있는다.
+   */
+  trend: TrendSnapshot | null;
+  /** 엔진 통계 — 매 틱(가벼운 값만) */
+  trendStats: TrendStats | null;
+  trendStatus: TrendStatus;
+  /** 직전 스냅샷 이후 퍼지는 글·이벤트 글에 들어온 like·repost — 스웜 클릭 링 */
+  pings: EngagePing[];
   /** 링 보관 구간과 겹치는 단절 구간만 — 오래된 것 → 최신 순 */
   gaps: GapMarker[];
   backpressure: BackpressureStats;
@@ -442,10 +361,10 @@ export type MainToWorker =
    */
   | { type: "setFilter"; wantedCollections: string[] }
   /**
-   * Surge 튜닝 파라미터 교체(부분 갱신). 개발용 튜닝 패널이 보낸다 — 세션 한정이며
-   * 어디에도 저장하지 않는다. 적용된 실제 값은 스냅샷의 surge.tuning으로 돌아온다.
+   * 픽스처 스트림 모드 — Jetstream 대신 결정적 합성 스트림을 재생한다(네트워크 불필요).
+   * e2e와 오프라인 데모용. 이름은 src/trend/fixtures.ts의 시나리오.
    */
-  | { type: "surgeTune"; tuning: Partial<SurgeTuning> }
+  | { type: "fixture"; name: string }
   /**
    * 개발용 강제 단절. 소켓을 끊고 blockMs 동안은 재연결 시도도 실패시킨다 —
    * DevTools 오프라인 토글은 이미 열린 WebSocket을 끊지 못하므로(수신만 멈춘다)

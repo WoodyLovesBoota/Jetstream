@@ -119,3 +119,31 @@ export function slimEvent(raw: unknown): SlimEvent | null {
   if (parent !== null) out.rp = parent;
   return out;
 }
+
+/**
+ * SlimEvent → Jetstream 원시 이벤트 모양. 픽스처 모드가 합성 이벤트를 실제 수신 경로
+ * (JSON.parse → 게이지·Pulse·Mix·Tape·트렌드)에 그대로 태우기 위해 쓴다.
+ * slimEvent(toRawEvent(e))는 e와 같다(테스트로 보장).
+ */
+export function toRawEvent(e: SlimEvent): Record<string, unknown> {
+  const collection = e.c === "p" ? "app.bsky.feed.post" : e.c === "l" ? "app.bsky.feed.like" : "app.bsky.feed.repost";
+  let record: Record<string, unknown>;
+  if (e.c !== "p") {
+    record = { $type: collection, subject: { uri: e.s, cid: "" }, createdAt: "" };
+  } else {
+    record = { $type: collection, text: e.x ?? "", createdAt: "" };
+    if (e.g !== undefined) record.langs = e.g;
+    const facets: unknown[] = [];
+    for (const tag of e.h ?? []) facets.push({ features: [{ $type: "app.bsky.richtext.facet#tag", tag }] });
+    for (const uri of e.u ?? []) facets.push({ features: [{ $type: "app.bsky.richtext.facet#link", uri }] });
+    if (facets.length > 0) record.facets = facets;
+    if (e.q !== undefined) record.embed = { $type: "app.bsky.embed.record", record: { uri: e.q } };
+    if (e.rp !== undefined) record.reply = { parent: { uri: e.rp }, root: { uri: e.rp } };
+  }
+  return {
+    did: e.d,
+    time_us: e.t,
+    kind: "commit",
+    commit: { rev: "", operation: "create", collection, rkey: e.k ?? `fx${e.t}`, record },
+  };
+}

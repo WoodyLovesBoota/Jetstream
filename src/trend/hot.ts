@@ -93,7 +93,7 @@ export class HotInfo {
     this.notePostId(idHash, p.timeMs);
     this.postsDecayed++;
     for (const l of p.links) this.bump(this.links, l, this.linkSlots);
-    if (p.langs.length > 0) this.bump(this.langs, p.langs[0].split("-")[0].toLowerCase(), 8);
+    this.bump(this.langs, p.langs.length > 0 ? p.langs[0].split("-")[0].toLowerCase() : "und", 8);
   }
 
   notePostId(idHash: number, timeMs: number): void {

@@ -9,7 +9,7 @@ import {
   type FilterMode,
   type MainToWorker,
   type StreamSnapshot,
-  type SurgeTuning,
+  type TrendSnapshot,
   type WsState,
 } from "./protocol";
 
@@ -42,11 +42,23 @@ export function setFilterMode(mode: FilterMode): void {
 }
 
 /**
- * Surge 튜닝 파라미터 부분 교체 — 개발용 튜닝 패널이 부른다. 세션 한정이며
- * 적용된 실제 값은 스냅샷의 surge.tuning으로 확인한다.
+ * 픽스처 스트림 모드 — URL `?fixture=이름`이면 Jetstream 대신 결정적 합성 스트림을
+ * 재생한다(네트워크 불필요, e2e·오프라인 데모용).
  */
-export function sendSurgeTune(tuning: Partial<SurgeTuning>): void {
-  send({ type: "surgeTune", tuning });
+function fixtureName(): string | null {
+  if (typeof location === "undefined") return null;
+  const v = new URLSearchParams(location.search).get("fixture");
+  return v !== null && /^[a-z0-9-]{1,32}$/.test(v) ? v : null;
+}
+
+/**
+ * 마지막으로 받은 트렌드 스냅샷. 워커는 5초마다 한 번만 싣고 나머지 틱은 null이라,
+ * 소비자(카드·스웜)가 늘 최신 것을 보도록 모듈 스코프에 들고 있는다.
+ */
+let lastTrend: TrendSnapshot | null = null;
+
+export function latestTrend(): TrendSnapshot | null {
+  return lastTrend;
 }
 
 /**
@@ -61,6 +73,7 @@ export function subscribeStream(listener: Listener): () => void {
       type: "module",
     });
     worker.onmessage = (e: MessageEvent<StreamSnapshot>) => {
+      if (e.data.trend !== null) lastTrend = e.data.trend;
       for (const l of listeners) l(e.data);
 
       // dev 관찰 핸들 — verify 스킬(headless 검증)이 읽는다
@@ -68,11 +81,16 @@ export function subscribeStream(listener: Listener): () => void {
         (globalThis as Record<string, unknown>).__jetstream = e.data;
       }
     };
-    send({
-      type: "connect",
-      endpoints: [...JETSTREAM_INSTANCES],
-      wantedCollections: collectionsFor(filterMode),
-    });
+    const fixture = fixtureName();
+    if (fixture !== null) {
+      send({ type: "fixture", name: fixture });
+    } else {
+      send({
+        type: "connect",
+        endpoints: [...JETSTREAM_INSTANCES],
+        wantedCollections: collectionsFor(filterMode),
+      });
+    }
 
     if (process.env.NODE_ENV !== "production") {
       // 복구 경로 수동 재현용 — DevTools 오프라인 토글은 이미 열린 WebSocket을
@@ -87,7 +105,6 @@ export function subscribeStream(listener: Listener): () => void {
         stall: (perFrameUs = 4_000, durationMs = 15_000) =>
           send({ type: "debug", action: "stall", perFrameUs, durationMs }),
         filter: (mode: FilterMode) => setFilterMode(mode),
-        surgeTune: (tuning: Partial<SurgeTuning>) => sendSurgeTune(tuning),
         pause: (next?: boolean) => setRenderPaused(next ?? !isRenderPaused()),
         disconnect: () => send({ type: "disconnect" }),
         connect: () =>
@@ -105,6 +122,7 @@ export function subscribeStream(listener: Listener): () => void {
     if (listeners.size === 0 && worker !== null) {
       worker.terminate();
       worker = null;
+      lastTrend = null;
     }
   };
 }

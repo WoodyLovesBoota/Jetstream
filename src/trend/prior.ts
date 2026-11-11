@@ -18,6 +18,8 @@ export interface Prior {
   postsPerMinute: number;
   background: string[];
   entries: Map<string, PriorEntry>;
+  /** 언어별 평소 post 점유율 — 언어 믹스 보정의 초기값 */
+  langShare?: Record<string, number>;
 }
 
 export interface PriorFile {
@@ -27,6 +29,7 @@ export interface PriorFile {
   postsPerMinute: number;
   background: string[];
   c: Record<string, [number, number] | [number, number, number[]]>;
+  langShare?: Record<string, number>;
 }
 
 function num(x: unknown): number | null {
@@ -53,7 +56,13 @@ export function parsePrior(json: unknown): Prior | null {
     }
     entries.set(key, e);
   }
+  let langShare: Record<string, number> | undefined;
+  if (typeof f.langShare === "object" && f.langShare !== null) {
+    langShare = {};
+    for (const [l, v] of Object.entries(f.langShare)) if (num(v) !== null && v >= 0) langShare[l] = v;
+  }
   return {
+    langShare,
     createdAt: typeof f.createdAt === "string" ? f.createdAt : "",
     sourceMinutes: num(f.sourceMinutes) ?? 0,
     postsPerMinute: ppm,
@@ -69,7 +78,7 @@ export function serializePrior(p: Prior): PriorFile {
   for (const [k, e] of p.entries) {
     c[k] = e.hf === undefined ? [sig(e.mu), sig(e.phi)] : [sig(e.mu), sig(e.phi), Array.from(e.hf, (x) => Number(x.toFixed(2)))];
   }
-  return {
+  const out: PriorFile = {
     v: 1,
     createdAt: p.createdAt,
     sourceMinutes: p.sourceMinutes,
@@ -77,4 +86,9 @@ export function serializePrior(p: Prior): PriorFile {
     background: p.background,
     c,
   };
+  if (p.langShare !== undefined) {
+    out.langShare = {};
+    for (const [l, v] of Object.entries(p.langShare)) out.langShare[l] = sig(v);
+  }
+  return out;
 }

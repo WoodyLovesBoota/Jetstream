@@ -1,13 +1,12 @@
 import DeckStatus from "@/components/DeckStatus";
 import Gauges from "@/components/Gauges";
 import Header from "@/components/Header";
-import Tuner from "@/components/Tuner";
 import Hud from "@/components/Hud";
 import Mix from "@/components/Mix";
 import Panel from "@/components/Panel";
 import Pulse from "@/components/Pulse";
-import Surge from "@/components/Surge";
 import Tape from "@/components/Tape";
+import TrendList from "@/components/TrendList";
 import styles from "./page.module.css";
 
 // 배치(위 → 아래): 헤더 / 기록계(Pulse — 머리줄에 타입별 펜 리드아웃, 아래로 모눈
@@ -29,8 +28,8 @@ export default function Home() {
           <Pulse />
         </Panel>
         <div className={styles.grid}>
-          <Panel name="Surge" note="평소보다 갑자기 많이 쓰이는 단어" className={styles.surge}>
-            <Surge />
+          <Panel name="Trends" note="평소보다 설명되지 않게 많이, 여러 사람 사이에서 늘어나는 것" className={styles.surge}>
+            <TrendList />
           </Panel>
           <div className={styles.side}>
             <Panel name="Tape" note="새 게시물 표본" className={styles.tape}>
@@ -45,8 +44,6 @@ export default function Home() {
       <Hud />
       {/* 연결 전(빈 상태)·지속 장애(에러 상태)를 덮는 앰비언트 레이어 */}
       <DeckStatus />
-      {/* 개발 전용 Surge 튜닝 패널 — "t" 키로 토글, 프로덕션에선 렌더되지 않는다 */}
-      <Tuner />
     </div>
   );
 }

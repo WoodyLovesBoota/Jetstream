@@ -69,6 +69,8 @@ export interface EvalInput {
   background?: boolean;
   /** c: 전용 — lift */
   lift?: number;
+  /** c: 전용 — 짝의 상대(b)도 배경어인가 */
+  partnerBackground?: boolean;
   /** w: 전용 — bigram에 포섭됐는가 */
   subsumed?: boolean;
 }
@@ -119,6 +121,7 @@ export function evaluate(inp: EvalInput, cfg: TrendConfig): EvalResult {
   if (fail === null && inp.topShare > cfg.topShareMax) fail = "topShare";
   if (fail === null && inp.kind === "w" && inp.background === true) fail = "background";
   if (fail === null && inp.kind === "w" && inp.subsumed === true) fail = "subsumed";
+  if (fail === null && inp.kind === "c" && inp.partnerBackground === true) fail = "pairBackground";
   if (fail === null && inp.kind === "c" && (inp.lift ?? 0) < cfg.liftMin) fail = "lift";
   // 배경어 단독 금지는 점수와 무관하게 — 단어 자체가 배경이면 순위에 못 오른다
   return { z, s, aFactor, score, pass: fail === null, fail, lifecycle };

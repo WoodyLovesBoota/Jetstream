@@ -134,9 +134,9 @@ describe("이벤트 카드", () => {
 });
 
 describe("퍼지는 글", () => {
-  it("좋아요가 몰리는 글이 p: 이벤트로 진입하고 퍼지는 글 1위", () => {
+  it("좋아요가 몰리는 글은 퍼지는 글 1위 — p: 단독으로는 이벤트 카드가 되지 않는다", () => {
     const start = T0 + 12 * MIN;
-    const { snaps } = run({
+    const { snaps, engine } = run({
       endMs: T0 + 18 * MIN,
       topics: [{ text: "look at this", startMs: start, endMs: T0 + 18 * MIN, perMin: 1, authors: 1, authorPrefix: "viral", likesPerMin: 40 }],
     });
@@ -145,9 +145,8 @@ describe("퍼지는 글", () => {
     expect(top?.uri).toMatch(/^at:\/\/did:plc:viral0\/app\.bsky\.feed\.post\//);
     expect(top?.url).toMatch(/^https:\/\/bsky\.app\/profile\/did:plc:viral0\/post\//);
     expect(top?.p5).toBeGreaterThanOrEqual(15);
-    const ev = last?.events.find((e) => e.members.some((m) => m.kind === "p" && m.active));
-    expect(ev).toBeDefined();
-    expect(ev?.postUri).toBe(top?.uri);
-    expect(top?.eventId).toBe(ev?.id);
+    expect(top?.text).toContain("look at this"); // 세션 중 본 글이라 하이드레이션 전에도 본문이 있다
+    expect(engine.stateOf(`p:${top?.uri}`)).toBe("active");
+    expect(last?.events.some((e) => e.members.some((m) => m.kind === "p"))).toBe(false);
   });
 });

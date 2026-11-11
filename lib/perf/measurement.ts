@@ -9,7 +9,7 @@
 // (recv/s·drop/s·M·load%·lag)과 메인 스레드가 실측한 프레임 간격뿐이다. 추정·보정
 // 없이 관측한 값만 담는다.
 
-import { RING_SECONDS, type FilterMode, type SurgeTuning } from "@/lib/jetstream/protocol";
+import { RING_SECONDS, type FilterMode } from "@/lib/jetstream/protocol";
 
 /** 60초 고정 창 — 브리프의 "60초 구간 통계" */
 export const MEASURE_WINDOW_MS = 60_000;
@@ -46,15 +46,17 @@ export interface MeasureSecond {
   lagMs: number;
   degraded: boolean;
   filter: FilterMode;
-  /** Surge 추적 토큰 수 / 상한 / 누적 퇴출 / 누적 드롭 */
-  surgeTracked: number;
-  surgeCap: number;
-  surgeEvicted: number;
-  surgeDropped: number;
+  /** 트렌드 엔진 추적 후보 수 / 상한 / 누적 퇴출 / 봇 뮤트로 빠진 이벤트 누적 */
+  trendTracked: number;
+  trendCap: number;
+  trendEvicted: number;
+  trendMuted: number;
+  /** 엔진 자체 추정 메모리(bytes) */
+  trendBytes: number;
+  /** 마지막 점수 패스 소요(ms) */
+  trendScoreMs: number;
   /** Tape stride N */
   tapeStrideN: number;
-  /** 워커가 실제 적용 중인 튜닝값 */
-  tuning: SurgeTuning;
 }
 
 export interface MeasureWindow {
@@ -77,11 +79,13 @@ export interface MeasureWindow {
     maxLagMs: number;
   };
   caps: {
-    surgeTrackedMax: number;
-    /** 이 창 동안 늘어난 퇴출 수 */
-    surgeEvictedDelta: number;
-    /** 이 창 동안 늘어난 드롭 수(만석) */
-    surgeDroppedDelta: number;
+    trendTrackedMax: number;
+    /** 이 창 동안 늘어난 추적 퇴출 수 */
+    trendEvictedDelta: number;
+    /** 이 창 동안 봇 뮤트로 빠진 이벤트 수 */
+    trendMutedDelta: number;
+    trendBytesMax: number;
+    trendScoreMsMax: number;
     tapeStrideMax: number;
   };
 }
@@ -94,16 +98,14 @@ export interface MeasureExport {
   durationSec: number;
   /** 관측된 필터 — 창 사이에 바뀌면 "mixed" */
   filter: FilterMode | "mixed" | "unknown";
-  /** 마지막으로 관측한 튜닝값(= 확정값). 세션 중 바뀌면 tuningChanged가 true */
-  tuning: SurgeTuning | null;
-  tuningChanged: boolean;
   windows: MeasureWindow[];
   /** 세션 전체 상한 관측 — 장시간 소크의 근거 */
   caps: {
-    surgeTrackedMax: number;
-    surgeCap: number;
-    surgeEvictedTotal: number;
-    surgeDroppedTotal: number;
+    trendTrackedMax: number;
+    trendCap: number;
+    trendEvictedTotal: number;
+    trendMutedTotal: number;
+    trendBytesMax: number;
     tapeStrideMax: number;
     ringSeconds: number;
   };
@@ -158,7 +160,9 @@ interface OpenWindow {
   maxM: number;
   maxLoadPct: number;
   maxLagMs: number;
-  surgeTrackedMax: number;
+  trendTrackedMax: number;
+  trendBytesMax: number;
+  trendScoreMsMax: number;
   tapeStrideMax: number;
   evictAtOpen: number;
   evictLatest: number;
@@ -197,12 +201,9 @@ export function createMeasurementRecorder(): MeasurementRecorder {
 
   let filterSeen: FilterMode | null = null;
   let filterMixed = false;
-  let tuning: SurgeTuning | null = null;
-  let tuningFirst: string | null = null;
-  let tuningChanged = false;
-
-  let surgeCap = 0;
-  let surgeTrackedMax = 0;
+  let trendCap = 0;
+  let trendTrackedMax = 0;
+  let trendBytesMax = 0;
   let tapeStrideMax = 0;
   let evictFirst = Number.NaN;
   let evictLast = 0;
@@ -221,7 +222,9 @@ export function createMeasurementRecorder(): MeasurementRecorder {
       maxM: 1,
       maxLoadPct: 0,
       maxLagMs: 0,
-      surgeTrackedMax: 0,
+      trendTrackedMax: 0,
+      trendBytesMax: 0,
+      trendScoreMsMax: 0,
       tapeStrideMax: 1,
       evictAtOpen: Number.NaN,
       evictLatest: Number.NaN,
@@ -251,9 +254,11 @@ export function createMeasurementRecorder(): MeasurementRecorder {
         maxLagMs: r(w.maxLagMs, 1),
       },
       caps: {
-        surgeTrackedMax: w.surgeTrackedMax,
-        surgeEvictedDelta: evictDelta,
-        surgeDroppedDelta: dropDelta,
+        trendTrackedMax: w.trendTrackedMax,
+        trendEvictedDelta: evictDelta,
+        trendMutedDelta: dropDelta,
+        trendBytesMax: w.trendBytesMax,
+        trendScoreMsMax: r(w.trendScoreMsMax, 1),
         tapeStrideMax: w.tapeStrideMax,
       },
     };
@@ -325,11 +330,9 @@ export function createMeasurementRecorder(): MeasurementRecorder {
       windows.length = 0;
       filterSeen = null;
       filterMixed = false;
-      tuning = null;
-      tuningFirst = null;
-      tuningChanged = false;
-      surgeCap = 0;
-      surgeTrackedMax = 0;
+      trendCap = 0;
+      trendTrackedMax = 0;
+      trendBytesMax = 0;
       tapeStrideMax = 0;
       evictFirst = Number.NaN;
       evictLast = 0;
@@ -361,27 +364,26 @@ export function createMeasurementRecorder(): MeasurementRecorder {
       if (s.m > cur.maxM) cur.maxM = s.m;
       if (s.loadPct > cur.maxLoadPct) cur.maxLoadPct = s.loadPct;
       if (s.lagMs > cur.maxLagMs) cur.maxLagMs = s.lagMs;
-      if (s.surgeTracked > cur.surgeTrackedMax) cur.surgeTrackedMax = s.surgeTracked;
+      if (s.trendTracked > cur.trendTrackedMax) cur.trendTrackedMax = s.trendTracked;
+      if (s.trendBytes > cur.trendBytesMax) cur.trendBytesMax = s.trendBytes;
+      if (s.trendScoreMs > cur.trendScoreMsMax) cur.trendScoreMsMax = s.trendScoreMs;
       if (s.tapeStrideN > cur.tapeStrideMax) cur.tapeStrideMax = s.tapeStrideN;
-      if (Number.isNaN(cur.evictAtOpen)) cur.evictAtOpen = s.surgeEvicted;
-      cur.evictLatest = s.surgeEvicted;
-      if (Number.isNaN(cur.dropAtOpen)) cur.dropAtOpen = s.surgeDropped;
-      cur.dropLatest = s.surgeDropped;
+      if (Number.isNaN(cur.evictAtOpen)) cur.evictAtOpen = s.trendEvicted;
+      cur.evictLatest = s.trendEvicted;
+      if (Number.isNaN(cur.dropAtOpen)) cur.dropAtOpen = s.trendMuted;
+      cur.dropLatest = s.trendMuted;
 
-      // 세션 전체 상한/필터/튜닝 추적
+      // 세션 전체 상한/필터 추적
       if (filterSeen === null) filterSeen = s.filter;
       else if (filterSeen !== s.filter) filterMixed = true;
-      const tuneKey = JSON.stringify(s.tuning);
-      if (tuningFirst === null) tuningFirst = tuneKey;
-      else if (tuningFirst !== tuneKey) tuningChanged = true;
-      tuning = s.tuning;
-      surgeCap = s.surgeCap;
-      if (s.surgeTracked > surgeTrackedMax) surgeTrackedMax = s.surgeTracked;
+      trendCap = s.trendCap;
+      if (s.trendTracked > trendTrackedMax) trendTrackedMax = s.trendTracked;
+      if (s.trendBytes > trendBytesMax) trendBytesMax = s.trendBytes;
       if (s.tapeStrideN > tapeStrideMax) tapeStrideMax = s.tapeStrideN;
-      if (Number.isNaN(evictFirst)) evictFirst = s.surgeEvicted;
-      evictLast = s.surgeEvicted;
-      if (Number.isNaN(dropFirst)) dropFirst = s.surgeDropped;
-      dropLast = s.surgeDropped;
+      if (Number.isNaN(evictFirst)) evictFirst = s.trendEvicted;
+      evictLast = s.trendEvicted;
+      if (Number.isNaN(dropFirst)) dropFirst = s.trendMuted;
+      dropLast = s.trendMuted;
     },
 
     export() {
@@ -399,14 +401,13 @@ export function createMeasurementRecorder(): MeasurementRecorder {
         startedAt,
         durationSec: r((lastNow - startNow) / 1000, 0),
         filter,
-        tuning,
-        tuningChanged,
         windows: liveWindows,
         caps: {
-          surgeTrackedMax,
-          surgeCap,
-          surgeEvictedTotal: Number.isNaN(evictFirst) ? 0 : evictLast - evictFirst,
-          surgeDroppedTotal: Number.isNaN(dropFirst) ? 0 : dropLast - dropFirst,
+          trendTrackedMax,
+          trendCap,
+          trendEvictedTotal: Number.isNaN(evictFirst) ? 0 : evictLast - evictFirst,
+          trendMutedTotal: Number.isNaN(dropFirst) ? 0 : dropLast - dropFirst,
+          trendBytesMax,
           tapeStrideMax,
           ringSeconds: RING_SECONDS,
         },

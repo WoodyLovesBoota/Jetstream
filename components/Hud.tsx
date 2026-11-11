@@ -32,9 +32,9 @@ const ROWS = [
   ["proc/s", "proc"],
   ["drop/s", "drop"],
   ["cols 10s", "cols"],
-  ["tokens", "tokens"],
-  ["tok evict", "tokEvict"],
-  ["tok drop", "tokDrop"],
+  ["tracked", "tokens"],
+  ["evict", "tokEvict"],
+  ["bots", "tokDrop"],
   ["snap", "snap"],
   ["frame p95", "frame"],
   ["ws", "ws"],
@@ -182,7 +182,7 @@ export default function Hud() {
           lastMeasureSec = sec;
           const c = snapshot.counters;
           const bp = snapshot.backpressure;
-          const su = snapshot.surgeStats;
+          const ts = snapshot.trendStats;
           rec.noteSecond(now, {
             recvPerSec: c.recvPerSec,
             procPerSec: c.procPerSec,
@@ -192,12 +192,13 @@ export default function Hud() {
             lagMs: bp.lagMs,
             degraded: bp.degraded,
             filter: snapshot.conn.filter,
-            surgeTracked: su.tracked,
-            surgeCap: su.cap,
-            surgeEvicted: su.evicted,
-            surgeDropped: su.dropped,
+            trendTracked: ts?.tracked ?? 0,
+            trendCap: ts?.trackedCap ?? 0,
+            trendEvicted: ts?.trackedEvicted ?? 0,
+            trendMuted: ts?.mutedEvents ?? 0,
+            trendBytes: ts?.approxBytes ?? 0,
+            trendScoreMs: ts?.scoreMs ?? 0,
             tapeStrideN: snapshot.tapeStats.strideN,
-            tuning: snapshot.surge.tuning,
           });
         }
       }
@@ -224,10 +225,11 @@ export default function Hud() {
           setText(els.drop, String(c.dropPerSec));
           setText(els.cols, String(countCollections(snapshot, collSet)));
           els.cols.dataset.filter = snapshot.conn.filter;
-          const su = snapshot.surgeStats;
-          setText(els.tokens, `${compact(su.tracked)}/${compact(su.cap)}`);
-          setText(els.tokEvict, String(su.evicted));
-          setText(els.tokDrop, String(su.dropped));
+          // 트렌드 엔진: 추적 후보/상한, 상한 퇴출 누적, 봇 뮤트 중 DID 수
+          const ts = snapshot.trendStats;
+          setText(els.tokens, ts === null ? "—" : `${compact(ts.tracked)}/${compact(ts.trackedCap)}`);
+          setText(els.tokEvict, ts === null ? "—" : String(ts.trackedEvicted));
+          setText(els.tokDrop, ts === null ? "—" : String(ts.muted));
 
           const conn = snapshot.conn;
           setText(els.ws, connText(conn));

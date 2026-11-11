@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { SURGE_TUNING_DEFAULTS } from "@/lib/jetstream/protocol";
 import { createMeasurementRecorder, type MeasureSecond } from "./measurement";
 
 // 레코더는 nowMs를 전부 파라미터로 받는 순수 집계기라 시계 모킹 없이 검증한다.
@@ -14,12 +13,13 @@ function sec(over: Partial<MeasureSecond> = {}): MeasureSecond {
     lagMs: 0,
     degraded: false,
     filter: "filtered",
-    surgeTracked: 5,
-    surgeCap: 50_000,
-    surgeEvicted: 0,
-    surgeDropped: 0,
+    trendTracked: 5,
+    trendCap: 30_000,
+    trendEvicted: 0,
+    trendMuted: 0,
+    trendBytes: 1000,
+    trendScoreMs: 2,
     tapeStrideN: 1,
-    tuning: { ...SURGE_TUNING_DEFAULTS },
     ...over,
   };
 }
@@ -81,17 +81,16 @@ describe("createMeasurementRecorder", () => {
     expect(rec.export().windows.length).toBe(0);
   });
 
-  it("창 사이에 필터·튜닝이 바뀌면 mixed/tuningChanged로 표시된다", () => {
+  it("창 사이에 필터가 바뀌면 mixed, 트렌드 상한은 최대·누적으로 남는다", () => {
     const rec = createMeasurementRecorder();
     rec.start("mixed", {}, 0);
-    rec.noteSecond(1000, sec({ filter: "filtered" }));
-    rec.noteSecond(2000, sec({ filter: "full" }));
-    rec.noteSecond(3000, sec({ tuning: { ...SURGE_TUNING_DEFAULTS, alpha: 9 } }));
+    rec.noteSecond(1000, sec({ filter: "filtered", trendEvicted: 10, trendBytes: 5e6 }));
+    rec.noteSecond(2000, sec({ filter: "full", trendEvicted: 25, trendBytes: 9e6 }));
     rec.stop(4000);
 
     const out = rec.export();
     expect(out.filter).toBe("mixed");
-    expect(out.tuningChanged).toBe(true);
-    expect(out.tuning?.alpha).toBe(9); // 마지막 관측값이 확정값이다
+    expect(out.caps.trendEvictedTotal).toBe(15);
+    expect(out.caps.trendBytesMax).toBe(9e6);
   });
 });

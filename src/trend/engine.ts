@@ -35,6 +35,35 @@ const ENGAGE_EVAL_TOP = 400;
 /** p: 핫(인용·답글 post-ID 수집) 대상 수 */
 const ENGAGE_HOT = 300;
 const MEMORY_CAP = 120_000;
+/** 언어 믹스 보정에서 따로 세는 언어 수 상한 */
+const LANG_CAP = 48;
+/** 후보의 주 언어로 인정하는 최소 비중 */
+const LANG_DOMINANT = 0.6;
+
+function primaryLang(langs: string[] | undefined): string {
+  const l = langs?.[0]?.split("-")[0]?.toLowerCase();
+  return l !== undefined && /^[a-z]{2,3}$/.test(l) ? l : "und";
+}
+
+/** 최근 글 5개 중 4개 이상이 (URL·숫자·멘션 뺀) 같은 문장이면 복붙 */
+function isCopypasta(recent: readonly RecentPost[]): boolean {
+  if (recent.length < 4) return false;
+  const counts = new Map<string, number>();
+  for (const p of recent) {
+    const norm = p.text
+      .toLowerCase()
+      .replace(/https?:\/\/\S+|@[\w.-]+|\d+/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 60);
+    if (norm.length < 12) continue;
+    counts.set(norm, (counts.get(norm) ?? 0) + 1);
+  }
+  for (const v of counts.values()) if (v >= 4) return true;
+  return false;
+}
+/** 최근 post 본문 LRU — p:/q: 이벤트 제목과 퍼지는 글 본문을 하이드레이션 전에 채운다 */
+const POST_TEXT_CAP = 10_000;
 /** 기억 없는 후보가 진입하려면 필요한 실제 관측 분 수 */
 const MIN_HIST = 3;
 
@@ -98,7 +127,12 @@ export class TrendEngine {
   private lastScoreMs = 0;
   private lastBackgroundMin: number;
   private lastSnapshot: TrendSnapshot | null = null;
+  private lastEvals: Map<string, Eval> = new Map();
   private readonly pings: EngagePing[] = [];
+  private readonly postTexts = new Map<string, RecentPost>();
+  /** 언어별 post 버킷 + 언어 점유율 EWMA — 언어 믹스 보정용 */
+  private readonly langPosts = new Map<string, BucketSeries>();
+  private readonly langMu = new Map<string, { mu: number; n: number }>();
   private pendingSave: BaselineRecord[] = [];
   private staleDropped = 0;
   private scoreMs = 0;
@@ -145,6 +179,7 @@ export class TrendEngine {
       if (e.hf !== undefined) this.hourFactor.set(key, e.hf);
     }
     this.background = new Set(p.background);
+    for (const [lang, share] of Object.entries(p.langShare ?? {})) this.langMu.set(lang, { mu: share * scale, n });
   }
 
   /** 저장소에서 읽은 기억을 합친다 — prior보다 새로우면 우선 */
@@ -275,8 +310,18 @@ export class TrendEngine {
     const minute = Math.floor(tMs / MIN_MS);
     const bucket = Math.floor(tMs / (c.bucketSec * 1000));
     const isPost = ev.c === "p";
-    if (isPost) this.posts.add(bucket);
-    else this.engages.add(bucket);
+    if (isPost) {
+      this.posts.add(bucket);
+      const lang = primaryLang(ev.g);
+      let ls = this.langPosts.get(lang);
+      if (ls === undefined && this.langPosts.size < LANG_CAP) {
+        ls = new BucketSeries(c.buckets);
+        this.langPosts.set(lang, ls);
+      }
+      ls?.add(bucket);
+    } else {
+      this.engages.add(bucket);
+    }
 
     const didHash = hash32(ev.d);
     if (!this.dedup.admit(didHash, isPost, minute)) return { keys, counted: false };
@@ -284,6 +329,16 @@ export class TrendEngine {
     let recent: RecentPost | null = null;
     let idHash = 0;
     let links: string[] | null = null;
+    if (isPost && ev.k !== undefined) {
+      links = this.linksOf(keys);
+      recent = { did: ev.d, rkey: ev.k, text: (ev.x ?? "").slice(0, 140), timeMs: tMs, langs: ev.g ?? [], links };
+      idHash = postIdHash(ev.d, ev.k);
+      if (this.postTexts.size >= POST_TEXT_CAP) {
+        const first = this.postTexts.keys().next();
+        if (first.done !== true) this.postTexts.delete(first.value);
+      }
+      this.postTexts.set(postUri(ev.d, ev.k), recent);
+    }
     for (const key of keys) {
       const kh = hash32(key);
       if (!this.dedup.first(didHash, kh)) continue;
@@ -402,6 +457,15 @@ export class TrendEngine {
         this.tracked.hist[slot] += 1;
       }
     }
+    // (1b) 언어 점유율 — 같은 지연·반감기
+    if (gMin > 0) {
+      for (const [lang, series] of this.langPosts) {
+        const share = series.sum(d * per + per - 1, per) / gMin;
+        const cur = this.langMu.get(lang) ?? { mu: 0, n: 0 };
+        const up = ewmaUpdate(cur.mu, 0, share, this.alpha);
+        this.langMu.set(lang, { mu: up.mu, n: cur.n + 1 });
+      }
+    }
     // (2) 핫 정리
     const windowMs = c.windowMin * MIN_MS;
     for (const h of this.hot.values()) h.minuteTick(nowMs, windowMs);
@@ -434,10 +498,19 @@ export class TrendEngine {
   private recomputeBackground(nowMs: number): void {
     // 세션 학습이 아직 없으면(prior만 있는 초반) prior 집합을 유지한다
     if (this.sessionMinutes(nowMs) < this.cfg.baselineDelayMin + 2 && this.background.size > 0) return;
+    // 지금(또는 15분 안에) 트렌드였던 단어는 배경이 아니라 뉴스다 — 세션 평소가 짧으면
+    // 그 단어의 μ̂가 금세 0.3%를 넘어 배경어가 되고, 그 짝이 쏟아진다(픽스처에서 확인)
+    const trending = new Set<string>();
+    for (const [k, st] of this.cand) {
+      if (st.state === "idle") continue;
+      if (k.startsWith("w:")) trending.add(k.slice(2));
+      else if (k.startsWith("b:")) for (const w of k.slice(2).split(" ")) trending.add(w);
+      else if (k.startsWith("h:")) trending.add(k.slice(2));
+    }
     const words: { w: string; mu: number }[] = [];
     for (const slot of this.tracked.slots()) {
       const key = this.tracked.keys[slot];
-      if (key === null || !key.startsWith("w:")) continue;
+      if (key === null || !key.startsWith("w:") || trending.has(key.slice(2))) continue;
       const mu = this.muHat(slot);
       if (mu > 0) words.push({ w: key.slice(2), mu });
     }
@@ -499,13 +572,25 @@ export class TrendEngine {
         z = zScore(x, lambda, phi);
       }
       this.tracked.lastZ[slot] = z;
-      if (x > 0 && (z > 0.5 || ageMin < 2 || watched)) hotRank.push({ key, pri: watched ? 1e9 : (ageMin < 2 ? 1e6 : 0) + z });
+      // 핫 우선순위: 진입 > 퇴출선(z≥2) 위 > 갓 승격 > z. 게이트(U≥8)를 따지는 후보가
+      // 작성자 맵을 잃지 않게, 퇴출선 위는 무조건 핫이다
+      if (x > 0 && (z > 0.5 || ageMin < 2 || watched)) {
+        hotRank.push({ key, pri: watched ? 1e9 : z >= c.zExit ? 1e6 + z : ageMin < 2 ? 1e3 + z : z });
+      }
 
       const candidate = convergent ? x >= c.minParticipantsLink : z >= c.zEnter;
       if (!candidate && !watched) continue;
 
       const h = this.hot.get(key);
       const as = h?.authorStats(minute) ?? { u: 0, newRatio: 0, topCount: 0, mentions: 0 };
+      if (!convergent && h !== undefined) {
+        // 언어 믹스 보정 — 후보의 글이 대부분 한 언어면, 그 언어의 지금 점유율이 평소보다 높은
+        // 만큼 기대치를 올린다. 미국 아침·브라질 저녁처럼 언어 구성이 바뀌는 시간대에 그 언어
+        // 상용어 전체가 급등으로 보이는 것을 막는다(실녹화 리플레이에서 확인)
+        const f = this.langFactor(h, bNow, W, g5);
+        lambda *= f;
+        z = zScore(x, lambda, phi);
+      }
       const xPrev = this.tracked.sum(slot, bNow - W, W);
       const a = accelRatio(x, g5, xPrev, gPrev, c.accelEps);
       const known = this.tracked.known[slot] === 1;
@@ -525,8 +610,11 @@ export class TrendEngine {
         n,
         background: kind === "w" ? this.background.has(key.slice(2)) : undefined,
         lift,
+        partnerBackground: kind === "c" ? this.background.has(key.slice(key.indexOf("|") + 1)) : undefined,
       };
-      const res = evaluate(inp, c);
+      let res = evaluate(inp, c);
+      // 복붙 스팸 — 최근 글 대부분이 같은 문장이면 서로 다른 계정이어도 퍼짐이 아니다
+      if (res.pass && h !== undefined && isCopypasta(h.recent)) res = { ...res, pass: false, fail: "copypasta" };
       // 평소를 아직 모르는 후보(기억 없음 & 실제 관측 3분 미만)는 점수는 내되 진입시키지 않는다
       if (!convergent && !known && this.tracked.hist[slot] < MIN_HIST && res.pass) {
         evals.set(key, { key, kind, x, lambda, u: as.u, newRatio: as.newRatio, topShare, a, n, res: { ...res, pass: false, fail: "learning" } });
@@ -571,7 +659,18 @@ export class TrendEngine {
       }
       if (st.p5 >= SPREADING_MIN) {
         const uri = key.slice(2);
-        spreading.push({ uri, url: bskyUrl(uri), score: res.score, p5: st.p5, p30: st.p30, votes30: st.votes30, a, lifecycle: res.lifecycle, eventId: null });
+        spreading.push({
+          uri,
+          url: bskyUrl(uri),
+          text: this.postTexts.get(uri)?.text ?? null,
+          score: res.score,
+          p5: st.p5,
+          p30: st.p30,
+          votes30: st.votes30,
+          a,
+          lifecycle: res.lifecycle,
+          eventId: null,
+        });
       }
     }
     // p: 핫 집합 갱신
@@ -581,6 +680,7 @@ export class TrendEngine {
     }
 
     // 히스테리시스
+    this.lastEvals = evals;
     this.evaluated = evals.size;
     this.passed = 0;
     for (const e of evals.values()) {
@@ -600,12 +700,16 @@ export class TrendEngine {
       }
     }
 
-    // 핫 집합 갱신 — 진입 > 갓 승격 > z 순, 상한 hotCap
+    // 핫 집합 갱신 — 상위 hotCap은 새로 핫, 이미 핫인 것은 상위 1.5×hotCap 안이면 유지
+    // (경계에서 출렁이며 작성자 맵을 잃었다 다시 만드는 일을 막는 히스테리시스)
     hotRank.sort((x, y) => y.pri - x.pri);
-    const keep = new Set<string>();
-    for (let i = 0; i < hotRank.length && i < c.hotCap; i++) keep.add(hotRank[i].key);
-    for (const k of [...this.hot.keys()]) if (!keep.has(k)) this.hot.delete(k);
-    for (const k of keep) this.makeHot(k, nowMs);
+    const keepLoose = new Set<string>();
+    for (let i = 0; i < hotRank.length && i < c.hotCap * 1.5; i++) keepLoose.add(hotRank[i].key);
+    for (const k of [...this.hot.keys()]) if (!keepLoose.has(k)) this.hot.delete(k);
+    for (let i = 0; i < hotRank.length && this.hot.size < c.hotCap * 1.5; i++) {
+      if (i < c.hotCap) this.makeHot(hotRank[i].key, nowMs);
+      else break;
+    }
 
     const events = this.buildEvents(evals, nowMs, bNow, minute);
     // 퍼지는 글 — 이벤트 소속 표시
@@ -625,6 +729,28 @@ export class TrendEngine {
       learning: { active: this.learning(nowMs), minutes: Math.floor(sessionMin), hasPrior: this.hasPrior },
       stats: this.stats(g5),
     };
+  }
+
+  private langFactor(h: HotInfo, bNow: number, W: number, g5: number): number {
+    let total = 0;
+    let topLang = "";
+    let topV = 0;
+    for (const [l, v] of h.langs) {
+      if (l === "und") continue; // 언어 미지정(봇·일부 클라이언트)은 판정에서 뺀다
+      total += v;
+      if (v > topV) {
+        topV = v;
+        topLang = l;
+      }
+    }
+    if (total <= 0 || topV / total < LANG_DOMINANT || g5 <= 0) return 1;
+    const base = this.langMu.get(topLang);
+    const series = this.langPosts.get(topLang);
+    if (base === undefined || series === undefined || base.n < 3) return 1;
+    const usual = base.mu * biasFactor(this.alpha, base.n);
+    if (usual <= 0) return 1;
+    const now = series.sum(bNow, W) / g5;
+    return Math.min(3, Math.max(0.5, now / usual));
   }
 
   private liftFor(key: string, xab: number, bNow: number): number {
@@ -677,9 +803,11 @@ export class TrendEngine {
     const usedIds = new Set<number>();
     const built: TrendEvent[] = [];
 
+    // 좋아요 몰린 글(p:)만으로 된 묶음은 이벤트가 아니라 '퍼지는 글' 탭의 몫이다 — 실데이터에서
+    // 5분에 15명 넘게 누르는 글이 수십 개라 z'가 쉽게 포화해, 이벤트 15칸을 독점했다
     const comps = groups
       .map((g) => g.map((i) => nodes[i]))
-      .filter((keys) => keys.some((k) => activeSet.has(k)))
+      .filter((keys) => keys.some((k) => activeSet.has(k) && !k.startsWith("p:")))
       .map((keys) => keys.sort((x, y) => (evals.get(y)?.res.score ?? 0) - (evals.get(x)?.res.score ?? 0)))
       .sort((x, y) => (evals.get(y[0])?.res.score ?? 0) - (evals.get(x[0])?.res.score ?? 0));
 
@@ -839,7 +967,7 @@ export class TrendEngine {
       if (h === undefined) continue;
       for (const [l, v] of h.langs) langCount.set(l, (langCount.get(l) ?? 0) + v);
     }
-    const langs = [...langCount.entries()].sort((x, y) => y[1] - x[1]).slice(0, 2).map(([l]) => l);
+    const langs = [...langCount.entries()].filter(([l]) => l !== "und").sort((x, y) => y[1] - x[1]).slice(0, 2).map(([l]) => l);
 
     // 스파크라인 — 최고 점수 멤버
     let spark: number[] = [];
@@ -863,8 +991,20 @@ export class TrendEngine {
     const pUri = titleKind === "p" || titleKind === "q" ? titleMember.key.slice(2) : null;
     let title = titleMember.label;
     if (pUri !== null) {
-      // 글 제목은 UI가 하이드레이션한다 — 그 전까지는 대표 글 앞부분 또는 짧은 표기
-      title = reps[0]?.text.slice(0, 60) || `글 ${pUri.split("/").pop() ?? ""}`;
+      // 글 본문: 세션 중 본 글이면 LRU에서, 아니면 UI가 getPosts로 하이드레이션한다
+      const known = this.postTexts.get(pUri);
+      title = known?.text.slice(0, 80) || `글 ${pUri.split("/").pop() ?? ""}`;
+      if (known !== undefined && !representativePosts.some((p) => p.rkey === known.rkey && p.did === known.did)) {
+        representativePosts.unshift({
+          did: known.did,
+          rkey: known.rkey,
+          text: known.text,
+          timeMs: known.timeMs,
+          url: `https://bsky.app/profile/${known.did}/post/${known.rkey}`,
+          langs: known.langs,
+        });
+        representativePosts.length = Math.min(representativePosts.length, 2);
+      }
     } else if (titleKind === "u") {
       title = titleMember.label.replace(/^[^/]+\//, (d) => d).slice(0, 80);
     }
@@ -944,6 +1084,41 @@ export class TrendEngine {
   }
 
   // ── 테스트·도구용 관찰 ────────────────────────────────────────────
+
+  /** 마지막 점수 패스에서 평가된 후보 상위 n — 튜닝 도구(replay --explain)용 */
+  explain(n: number, filter?: (key: string) => boolean): {
+    key: string;
+    x: number;
+    lambda: number;
+    z: number;
+    u: number;
+    newRatio: number;
+    topShare: number;
+    a: number;
+    n: number;
+    score: number;
+    fail: string | null;
+    state: string | null;
+  }[] {
+    return [...this.lastEvals.values()]
+      .filter((e) => filter === undefined || filter(e.key))
+      .sort((x, y) => y.res.score - x.res.score)
+      .slice(0, n)
+      .map((e) => ({
+        key: e.key,
+        x: e.x,
+        lambda: Number(e.lambda.toFixed(1)),
+        z: Number(e.res.z.toFixed(1)),
+        u: e.u,
+        newRatio: Number(e.newRatio.toFixed(2)),
+        topShare: Number(e.topShare.toFixed(2)),
+        a: Number(e.a.toFixed(2)),
+        n: e.n,
+        score: Number(e.res.score.toFixed(1)),
+        fail: e.res.fail,
+        state: this.stateOf(e.key),
+      }));
+  }
 
   /** 추적 중 후보의 현재 평소 점유율 μ̂ (bias 보정 후) — 없으면 null */
   baselineOf(key: string): number | null {

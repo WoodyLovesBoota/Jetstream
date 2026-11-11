@@ -38,7 +38,13 @@ export function isConvergent(kind: CandidateKind): boolean {
 }
 
 const URL_RE = /https?:\/\/\S+/gi;
-const BARE_DOMAIN_RE = /\b(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|co|io|news|app|social|gov|edu|uk|de|jp|kr)(?:\/\S*)?/gi;
+const BARE_DOMAIN_RE = /\b(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|co|io|news|app|social|gov|edu|uk|de|jp|kr|be|ly|it|me|tv|gg|ca|au|fr|es|br|in|ru|nl|us|info|xyz|link|site|online|digital|shop|store|blog|page|dev|ai)(?:\/\S*)?/gi;
+
+/** 단축 URL·링크 집계 서비스 — 도메인 자체엔 정보가 없다(u:는 남긴다) */
+const GENERIC_DOMAINS = new Set([
+  "bit.ly", "buff.ly", "tinyurl.com", "t.co", "ow.ly", "dlvr.it", "ift.tt", "is.gd", "goo.gl", "shorturl.at",
+  "rebrand.ly", "trib.al", "linktr.ee", "lnkd.in", "fb.me", "amzn.to", "a.co", "tiny.cc", "cutt.ly", "s.id",
+]);
 const MENTION_RE = /@[\w.-]+/g;
 const HASHTAG_RE = /[#＃]([\p{L}\p{M}\p{N}_]+)/gu;
 const CONTRACTION_RE = /['’](?:s|t|re|ll|ve|d|m)\b/giu;
@@ -219,7 +225,7 @@ export function extractKeys(ev: SlimEvent, opt: ExtractOptions, out: string[], w
     const n = normalizeUrl(raw);
     if (n === null) continue;
     add(`u:${n.url}`);
-    add(`d:${n.domain}`);
+    if (!GENERIC_DOMAINS.has(n.domain)) add(`d:${n.domain}`);
   }
   if (ev.q !== undefined) add(`q:${ev.q}`);
 }

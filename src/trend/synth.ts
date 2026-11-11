@@ -69,6 +69,8 @@ export interface SynthOptions {
   likesPerMin: number;
   authorPool: number;
   vocabSize: number;
+  /** 어휘를 직접 주면 vocabSize는 무시된다 */
+  vocab?: string[];
   /** 상시어와 그 등장 확률 */
   backgroundWords: { word: string; p: number }[];
   topics?: SynthTopic[];
@@ -84,7 +86,7 @@ function rkeyOf(n: number): string {
 /** 시간 순서 SlimEvent 생성기 */
 export function* synthStream(o: SynthOptions): Generator<SlimEvent> {
   const r = mulberry32(o.seed);
-  const vocab = makeVocab(o.vocabSize, o.seed + 1);
+  const vocab = o.vocab ?? makeVocab(o.vocabSize, o.seed + 1);
   // Zipf: 앞쪽 단어일수록 잦다 — r^2.2 로 인덱스를 뽑는다
   const word = (): string => vocab[Math.floor(Math.pow(r(), 2.2) * vocab.length)];
   const recent: string[] = [];
