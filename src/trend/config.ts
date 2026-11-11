@@ -26,6 +26,8 @@ export interface TrendConfig {
   priorWeightMin: number;
   /** 이 시간 미만 & prior 없음이면 "학습 중" */
   learningMin: number;
+  /** 관측이 짧은 후보의 기대치 가산: W × histPseudo / 관측분수 (포아송 불확실성 몫) */
+  histPseudo: number;
 
   // ── 배경어 ──
   backgroundTopN: number;
@@ -131,6 +133,7 @@ export const DEFAULT_CONFIG: TrendConfig = {
   phiMinObsMin: 30,
   priorWeightMin: 60,
   learningMin: 10,
+  histPseudo: 4,
 
   backgroundTopN: 300,
   backgroundShare: 0.003,

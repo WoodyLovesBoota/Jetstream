@@ -51,6 +51,8 @@ export class TrackedTable {
   readonly lastZ: Float32Array;
   /** 장기 기억(prior·저장소)에 있던 후보인가 */
   readonly known: Uint8Array;
+  /** 실제로 관측한 분 수(승격 시 CMS 이력 + 이후 베이스라인 갱신) — 기억 없는 후보의 진입 자격 */
+  readonly hist: Float32Array;
   readonly keys: (string | null)[];
   private readonly index = new Map<string, number>();
   private readonly free: number[] = [];
@@ -67,6 +69,7 @@ export class TrackedTable {
     this.firstSeenMs = new Float64Array(cap);
     this.lastZ = new Float32Array(cap);
     this.known = new Uint8Array(cap);
+    this.hist = new Float32Array(cap);
     this.keys = new Array<string | null>(cap).fill(null);
     for (let i = cap - 1; i >= 0; i--) this.free.push(i);
   }
@@ -97,6 +100,7 @@ export class TrackedTable {
     this.firstSeenMs[slot] = nowMs;
     this.lastZ[slot] = 0;
     this.known[slot] = 0;
+    this.hist[slot] = 0;
     return slot;
   }
 

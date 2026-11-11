@@ -1,0 +1,976 @@
+// 트렌드 판별 엔진 — 순수 TS. 시계(nowMs)는 호출자가 주입한다.
+//
+// 트렌드 = 자기 평소보다 통계적으로 설명되지 않게 많이(S1), 서로 다른 사람들 사이에서(S4),
+//          지금도 늘어나고 있는 것(S6). × 새로움(S2). 배경어는 단독 금지, 짝(S3)으로만.
+//
+// 파이프라인
+//   ingest (이벤트마다)  추출 → 작성자 중복 제거·봇 → CMS → 추적 승격·버킷 → 핫 후보 기록
+//   tick  (5초마다)      S1~S6 → 게이트·점수 → 히스테리시스 → 이벤트 묶기 → 스냅샷
+//   tick  (1분마다)      베이스라인 갱신(5분 지난 분만) → 핫 정리 → 저장 대기열 → 배경어 갱신
+
+import { biasFactor, ewmaUpdate, expectation, phiFrom, vFromPhi } from "./baseline.ts";
+import { clusterBySets } from "./cluster.ts";
+import { CountMinRing } from "./cms.ts";
+import { alphaFromHalfLife, makeConfig, type TrendConfig } from "./config.ts";
+import { AuthorDedup } from "./dedup.ts";
+import { bskyUrl, extractKeys, kindOf, labelOf, postUri, wordStream, type CandidateKind } from "./extract.ts";
+import { hash32, postIdHash } from "./hash.ts";
+import { HotInfo, type RecentPost } from "./hot.ts";
+import { newCandState, stepHysteresis, type CandState } from "./hysteresis.ts";
+import type { Prior } from "./prior.ts";
+import { accelRatio, evaluate, isConvergentKind, liftOf, noveltyOf, zScore, type EvalResult, type Lifecycle } from "./signals.ts";
+import type { SlimEvent } from "./slim.ts";
+import { EngageTopK } from "./spacesaving.ts";
+import type { BaselineRecord } from "./store.ts";
+import { BucketSeries, TrackedTable } from "./tracked.ts";
+import type { EngagePing, SpreadingPost, TrendEvent, TrendMember, TrendPost, TrendSnapshot, TrendStats } from "./types.ts";
+import { normalizeUrl } from "./url.ts";
+
+const MIN_MS = 60_000;
+const PALETTE = 12;
+/** 퍼지는 글 후보로 보는 최소 5분 참여자 */
+const SPREADING_MIN = 5;
+/** 점수 패스에서 상세 평가할 p: 상위 수 */
+const ENGAGE_EVAL_TOP = 400;
+/** p: 핫(인용·답글 post-ID 수집) 대상 수 */
+const ENGAGE_HOT = 300;
+const MEMORY_CAP = 120_000;
+/** 기억 없는 후보가 진입하려면 필요한 실제 관측 분 수 */
+const MIN_HIST = 3;
+
+interface MemEntry {
+  mu: number;
+  v: number;
+  n: number;
+  updatedAt: number;
+}
+
+interface Eval {
+  key: string;
+  kind: CandidateKind;
+  x: number;
+  lambda: number;
+  u: number;
+  newRatio: number;
+  topShare: number;
+  a: number;
+  n: number;
+  res: EvalResult;
+}
+
+export interface IngestInfo {
+  /** 이 이벤트의 후보 키 (재사용 배열 — 다음 ingest 전까지만 유효) */
+  keys: string[];
+  /** 집계에 반영됐는가(봇 뮤트·너무 오래된 이벤트면 false) */
+  counted: boolean;
+}
+
+export interface EngineOptions {
+  config?: Partial<TrendConfig>;
+  prior?: Prior | null;
+  /** 엔진 생성 시각 — 세션 시작 */
+  nowMs: number;
+}
+
+export class TrendEngine {
+  readonly cfg: TrendConfig;
+  private readonly alpha: number;
+  private readonly cms: CountMinRing;
+  private readonly tracked: TrackedTable;
+  private readonly posts: BucketSeries;
+  private readonly engages: BucketSeries;
+  private readonly engage: EngageTopK;
+  private readonly dedup: AuthorDedup;
+  private readonly hot = new Map<string, HotInfo>();
+  private readonly hotEngage = new Map<string, HotInfo>();
+  private readonly memory = new Map<string, MemEntry>();
+  private readonly hourFactor = new Map<string, Float32Array>();
+  private background = new Set<string>();
+  private readonly cand = new Map<string, CandState>();
+  private readonly events = new Map<number, TrendEvent>();
+  private eventOfKey = new Map<string, number>();
+  private spreadingKeys = new Map<string, number | null>();
+  private nextEventId = 1;
+  private readonly hasPrior: boolean;
+  private readonly sessionStartMs: number;
+  private readonly sessionStartMin: number;
+  private lastMinute: number;
+  private lastScoreMs = 0;
+  private lastBackgroundMin: number;
+  private lastSnapshot: TrendSnapshot | null = null;
+  private readonly pings: EngagePing[] = [];
+  private pendingSave: BaselineRecord[] = [];
+  private staleDropped = 0;
+  private scoreMs = 0;
+  private evaluated = 0;
+  private passed = 0;
+  private readonly keysBuf: string[] = [];
+  private readonly wordsBuf: string[] = [];
+  private readonly spk: number[] = [];
+
+  constructor(opts: EngineOptions) {
+    this.cfg = makeConfig(opts.config);
+    const c = this.cfg;
+    this.alpha = alphaFromHalfLife(c.baselineHalfLifeMin);
+    this.cms = new CountMinRing(c.cmsDepth, c.cmsWidth, c.cmsMinutes);
+    this.tracked = new TrackedTable(c.trackedCap, c.buckets);
+    this.posts = new BucketSeries(c.buckets);
+    this.engages = new BucketSeries(c.buckets);
+    this.engage = new EngageTopK(c.engageCap, c.engageLongMin, c.engageEvictFrac);
+    this.dedup = new AuthorDedup(c);
+    this.sessionStartMs = opts.nowMs;
+    this.sessionStartMin = Math.floor(opts.nowMs / MIN_MS);
+    this.lastMinute = this.sessionStartMin;
+    this.lastBackgroundMin = this.sessionStartMin;
+    this.hasPrior = opts.prior != null && opts.prior.entries.size > 0;
+    if (opts.prior != null) this.loadPrior(opts.prior);
+  }
+
+  // ── 평소 기억 ────────────────────────────────────────────────────
+
+  private loadPrior(p: Prior): void {
+    const updatedAt = Date.parse(p.createdAt) || 0;
+    // prior 값은 이미 편향 없는 추정치다. 엔진은 μ를 "0에서 출발해 n분 누적된 EWMA 원값"으로
+    // 들고 μ̂ = μ × biasFactor(n)로 읽으므로, prior를 n=60분 누적분으로 환산해 넣는다 —
+    // 그래야 로드 직후 μ̂ = prior μ이고, 이후 세션 관측과 60:k 비율로 섞인다.
+    const n = this.cfg.priorWeightMin;
+    const scale = 1 / biasFactor(this.alpha, n);
+    for (const [key, e] of p.entries) {
+      this.memory.set(key, {
+        mu: e.mu * scale,
+        v: vFromPhi(e.mu, e.phi, p.postsPerMinute, this.cfg.windowMin) * scale,
+        n,
+        updatedAt,
+      });
+      if (e.hf !== undefined) this.hourFactor.set(key, e.hf);
+    }
+    this.background = new Set(p.background);
+  }
+
+  /** 저장소에서 읽은 기억을 합친다 — prior보다 새로우면 우선 */
+  loadMemory(records: BaselineRecord[]): void {
+    for (const r of records) {
+      if (!(r.mu >= 0) || !Number.isFinite(r.v) || !(r.n > 0)) continue;
+      const cur = this.memory.get(r.key);
+      if (cur !== undefined && cur.updatedAt >= r.updatedAt) continue;
+      this.memory.set(r.key, { mu: r.mu, v: r.v, n: r.n, updatedAt: r.updatedAt });
+      const slot = this.tracked.slotOf(r.key);
+      if (slot >= 0 && this.tracked.known[slot] === 0) {
+        this.tracked.mu[slot] = r.mu;
+        this.tracked.v[slot] = r.v;
+        this.tracked.obs[slot] = r.n;
+        this.tracked.known[slot] = 1;
+        this.tracked.hist[slot] = r.n;
+      }
+    }
+  }
+
+  /** 1분마다 쌓인 저장 대기열을 비워 돌려준다 */
+  drainMemory(): BaselineRecord[] {
+    const out = this.pendingSave;
+    this.pendingSave = [];
+    return out;
+  }
+
+  drainPings(max = 64): EngagePing[] {
+    return this.pings.splice(0, Math.min(max, this.pings.length));
+  }
+
+  // ── ingest ──────────────────────────────────────────────────────
+
+  private sessionMinutes(nowMs: number): number {
+    return Math.max(0, (nowMs - this.sessionStartMs) / MIN_MS);
+  }
+
+  private promote(key: string, kh: number, minute: number, bucket: number, est: number, nowMs: number): number {
+    if (this.tracked.isFull()) {
+      const nowB = Math.floor(nowMs / (this.cfg.bucketSec * 1000));
+      this.tracked.evict(
+        this.cfg.trackedEvictFrac,
+        nowB,
+        (s) => {
+          const k = this.tracked.keys[s];
+          return k !== null && (this.cand.get(k)?.state === "active" || this.hot.has(k));
+        },
+        (s) => this.rememberSlot(s, nowMs),
+      );
+      // 핫이 아닌데 보호받던 것까지 꽉 찼다면 — 핫도 퇴출 대상에 넣고 다시
+      if (this.tracked.isFull()) {
+        this.tracked.evict(this.cfg.trackedEvictFrac, nowB, (s) => this.cand.get(this.tracked.keys[s] ?? "")?.state === "active", (s) => this.rememberSlot(s, nowMs));
+      }
+    }
+    const slot = this.tracked.insert(key, nowMs);
+    if (slot < 0) return -1;
+    // 과거 분은 CMS 링으로 백필 — 분 추정치를 그 분의 첫 버킷에 싣는다
+    const per = 60 / this.cfg.bucketSec;
+    for (let m = minute - this.cfg.cmsMinutes + 1; m < minute; m++) {
+      const e = this.cms.estimate(kh, m);
+      if (e > 0) this.tracked.add(slot, m * per, e);
+    }
+    this.tracked.add(slot, bucket, est);
+    const mem = this.memory.get(key);
+    if (mem !== undefined) {
+      this.tracked.mu[slot] = mem.mu;
+      this.tracked.v[slot] = mem.v;
+      this.tracked.obs[slot] = mem.n;
+      this.tracked.known[slot] = 1;
+      this.tracked.hist[slot] = mem.n;
+    } else {
+      // 기억에 없는 후보 — 승격 전 분들을 "0이었다"고 두면 문턱(분당 3) 아래로 늘 있던 단어가
+      // 승격 순간 평소≈0인 급등으로 보인다. 대신 CMS 링의 직전 분 점유율을 그 후보의
+      // 세션 전체(+prior 가중) 평소로 둔다. 새 밈은 직전 분이 ≈0이라 그대로 새것이다.
+      let cnt = 0;
+      let gsum = 0;
+      for (let m = minute - this.cfg.cmsMinutes + 1; m < minute; m++) {
+        cnt += this.cms.estimate(kh, m);
+        gsum += this.posts.sum(m * per + per - 1, per);
+      }
+      const muInit = gsum > 0 ? cnt / gsum : 0;
+      // CMS 이력이 다 찼으면(세션 5분+) 그 점유율을 세션 전체(+prior)로 외삽한다 — 문턱 아래로
+      // 계속 있었다는 사실과 맞는 가정이다. 세션 초반이면 실제 관측 분만큼만 가중한다.
+      const sessionMin = minute - this.sessionStartMin;
+      const h = Math.max(0, Math.min(this.cfg.cmsMinutes - 1, sessionMin));
+      const n = h >= this.cfg.cmsMinutes - 1 ? sessionMin + (this.hasPrior ? this.cfg.priorWeightMin : 0) : h;
+      this.tracked.hist[slot] = h;
+      const scale = n > 0 ? 1 / biasFactor(this.alpha, n) : 0;
+      const gm = gsum > 0 ? gsum / Math.max(1, h) : 1;
+      this.tracked.mu[slot] = muInit * scale;
+      this.tracked.v[slot] = vFromPhi(muInit, this.cfg.phiDefault, gm, this.cfg.windowMin) * scale;
+      this.tracked.obs[slot] = n;
+    }
+    if (this.hot.size < this.cfg.hotCap + 200) this.makeHot(key, nowMs);
+    return slot;
+  }
+
+  private rememberSlot(slot: number, nowMs: number): void {
+    const key = this.tracked.keys[slot];
+    if (key === null || this.tracked.obs[slot] <= 0) return;
+    if (this.memory.size >= MEMORY_CAP && !this.memory.has(key)) return;
+    this.memory.set(key, { mu: this.tracked.mu[slot], v: this.tracked.v[slot], n: this.tracked.obs[slot], updatedAt: nowMs });
+    this.hot.delete(key);
+  }
+
+  private makeHot(key: string, nowMs: number): HotInfo {
+    let h = this.hot.get(key);
+    if (h === undefined) {
+      const c = this.cfg;
+      h = new HotInfo(nowMs, c.hotAuthorCap, c.hotRecentPosts, c.hotPostIdCap, c.hotLinkSlots);
+      this.hot.set(key, h);
+    }
+    return h;
+  }
+
+  ingest(ev: SlimEvent, nowMs: number): IngestInfo {
+    const keys = this.keysBuf;
+    const c = this.cfg;
+    const tMs = Math.min(ev.t / 1000, nowMs);
+    // 추적 링(15분) 밖의 옛 이벤트 — 리플레이가 오래 밀렸을 때. 세지 않는다.
+    if (tMs < nowMs - c.buckets * c.bucketSec * 1000) {
+      this.staleDropped++;
+      keys.length = 0;
+      return { keys, counted: false };
+    }
+    extractKeys(ev, { isBackground: (w) => this.background.has(w), pairMax: c.pairMax, wordsPerPostMax: c.wordsPerPostMax }, keys);
+
+    const minute = Math.floor(tMs / MIN_MS);
+    const bucket = Math.floor(tMs / (c.bucketSec * 1000));
+    const isPost = ev.c === "p";
+    if (isPost) this.posts.add(bucket);
+    else this.engages.add(bucket);
+
+    const didHash = hash32(ev.d);
+    if (!this.dedup.admit(didHash, isPost, minute)) return { keys, counted: false };
+
+    let recent: RecentPost | null = null;
+    let idHash = 0;
+    let links: string[] | null = null;
+    for (const key of keys) {
+      const kh = hash32(key);
+      if (!this.dedup.first(didHash, kh)) continue;
+
+      if (!isPost) {
+        // 참여 대상 — Space-Saving만. 퍼지는 글·이벤트에 걸린 글이면 클릭 링 핑
+        this.engage.add(key, minute, ev.c === "r" ? c.repostVotes : 1, tMs);
+        const evId = this.eventOfKey.get(key);
+        if (evId !== undefined || this.spreadingKeys.has(key)) {
+          if (this.pings.length < 512) this.pings.push({ uri: key.slice(2), eventId: evId ?? this.spreadingKeys.get(key) ?? null, repost: ev.c === "r" });
+        }
+        continue;
+      }
+
+      const est = this.cms.add(kh, minute);
+      let slot = this.tracked.slotOf(key);
+      if (slot < 0) {
+        if (est < c.promoteMin) continue;
+        slot = this.promote(key, kh, minute, bucket, est, nowMs);
+        if (slot < 0) continue;
+      } else {
+        this.tracked.add(slot, bucket);
+      }
+
+      const h = this.hot.get(key);
+      if (h !== undefined) {
+        h.noteAuthor(didHash, minute);
+        if (recent === null) {
+          if (links === null) links = this.linksOf(keys);
+          recent = {
+            did: ev.d,
+            rkey: ev.k ?? "",
+            text: (ev.x ?? "").slice(0, 140),
+            timeMs: tMs,
+            langs: ev.g ?? [],
+            links,
+          };
+          idHash = postIdHash(ev.d, ev.k ?? String(ev.t));
+        }
+        h.notePost(recent, idHash);
+      }
+    }
+
+    // 인용·답글 → 대상 글(p:)의 post-ID 집합 — 이벤트 묶기에서 p:끼리·p:와 단어를 잇는다
+    if (isPost && (ev.q !== undefined || ev.rp !== undefined)) {
+      for (const target of [ev.q, ev.rp]) {
+        if (target === undefined) continue;
+        const h = this.hotEngage.get(`p:${target}`);
+        if (h === undefined) continue;
+        h.noteAuthor(didHash, minute);
+        h.notePost(
+          recent ?? { did: ev.d, rkey: ev.k ?? "", text: (ev.x ?? "").slice(0, 140), timeMs: tMs, langs: ev.g ?? [], links: this.linksOf(keys) },
+          postIdHash(ev.d, ev.k ?? String(ev.t)),
+        );
+      }
+    }
+    return { keys, counted: true };
+  }
+
+  private linksOf(keys: string[]): string[] {
+    const out: string[] = [];
+    for (const k of keys) if (k.startsWith("u:")) out.push(k.slice(2));
+    return out;
+  }
+
+  // ── tick ────────────────────────────────────────────────────────
+
+  /** 주기 작업. 점수 패스가 돌았으면 새 스냅샷, 아니면 null */
+  tick(nowMs: number): TrendSnapshot | null {
+    const minute = Math.floor(nowMs / MIN_MS);
+    if (minute > this.lastMinute) {
+      // 밀린 분은 최대 15분까지 하나씩 처리 — 그 이전은 버킷 링에 데이터가 없다
+      const from = Math.max(this.lastMinute + 1, minute - 15);
+      for (let m = from; m <= minute; m++) this.minuteTask(m, nowMs);
+      this.lastMinute = minute;
+    }
+    if (nowMs - this.lastScoreMs < this.cfg.scoreEveryMs) return null;
+    this.lastScoreMs = nowMs;
+    const t0 = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const snap = this.scorePass(nowMs);
+    this.scoreMs = (typeof performance !== "undefined" ? performance.now() : Date.now()) - t0;
+    snap.stats.scoreMs = this.scoreMs;
+    this.lastSnapshot = snap;
+    return snap;
+  }
+
+  snapshot(): TrendSnapshot | null {
+    return this.lastSnapshot;
+  }
+
+  private minuteTask(minute: number, nowMs: number): void {
+    const c = this.cfg;
+    const per = 60 / c.bucketSec;
+    // (1) 베이스라인: 지연(5분)보다 오래된, 끝난 분 하나 — minute−1−delay
+    const d = minute - 1 - c.baselineDelayMin;
+    const gMin = this.posts.sum(d * per + per - 1, per);
+    const hour = new Date(d * MIN_MS).getUTCHours();
+    if (gMin > 0) {
+      for (const slot of this.tracked.slots()) {
+        const firstMin = Math.floor(this.tracked.firstSeenMs[slot] / MIN_MS);
+        if (d < firstMin) continue; // 승격 전 분 — 승격 때 초기값(μ·n)에 이미 들어 있다
+        const key = this.tracked.keys[slot];
+        if (key === null || isConvergentKind(kindOf(key))) continue;
+        let s = this.tracked.sum(slot, d * per + per - 1, per) / gMin;
+        const hf = this.hourFactor.get(key);
+        if (hf !== undefined) s /= Math.max(0.05, hf[hour]);
+        // v 갱신 상한 = 3σ, σ² = 관측 분산 + 분 단위 포아송 분산(μ/Gm) — 둘 다 bias 보정 후
+        const bf = biasFactor(this.alpha, this.tracked.obs[slot]);
+        const muH = this.tracked.mu[slot] * bf;
+        const sd = Math.sqrt(this.tracked.v[slot] * bf + muH / gMin);
+        const up = ewmaUpdate(this.tracked.mu[slot], this.tracked.v[slot], s, this.alpha, 3 * sd);
+        this.tracked.mu[slot] = up.mu;
+        // 진행 중인 트렌드에서는 "평소 요동"(v)을 배우지 않는다 — μ만 따라간다
+        if (this.cand.get(key)?.state !== "active") this.tracked.v[slot] = up.v;
+        this.tracked.obs[slot] += 1;
+        this.tracked.hist[slot] += 1;
+      }
+    }
+    // (2) 핫 정리
+    const windowMs = c.windowMin * MIN_MS;
+    for (const h of this.hot.values()) h.minuteTick(nowMs, windowMs);
+    for (const h of this.hotEngage.values()) h.minuteTick(nowMs, windowMs);
+    // (3) 저장 대기열 — 추적 중인 후보의 현재 μ·v
+    const recs: BaselineRecord[] = [];
+    for (const slot of this.tracked.slots()) {
+      const key = this.tracked.keys[slot];
+      if (key === null || this.tracked.obs[slot] <= 0 || isConvergentKind(kindOf(key))) continue;
+      recs.push({ key, mu: this.tracked.mu[slot], v: this.tracked.v[slot], n: this.tracked.obs[slot], updatedAt: nowMs });
+    }
+    this.pendingSave = recs;
+    // (4) 배경어 — 첫 1시간은 자주, 이후 매시간
+    const every = minute - this.sessionStartMin < 60 ? c.backgroundEarlyEveryMin : c.backgroundEveryMin;
+    if (minute - this.lastBackgroundMin >= every) {
+      this.lastBackgroundMin = minute;
+      this.recomputeBackground(nowMs);
+    }
+  }
+
+  private learning(nowMs: number): boolean {
+    return !this.hasPrior && this.sessionMinutes(nowMs) < this.cfg.learningMin;
+  }
+
+  private muHat(slot: number): number {
+    return this.tracked.mu[slot] * biasFactor(this.alpha, this.tracked.obs[slot]);
+  }
+
+  /** 배경어 D = 평소 점유율 상위 N 또는 점유율 ≥ backgroundShare 인 단어 */
+  private recomputeBackground(nowMs: number): void {
+    // 세션 학습이 아직 없으면(prior만 있는 초반) prior 집합을 유지한다
+    if (this.sessionMinutes(nowMs) < this.cfg.baselineDelayMin + 2 && this.background.size > 0) return;
+    const words: { w: string; mu: number }[] = [];
+    for (const slot of this.tracked.slots()) {
+      const key = this.tracked.keys[slot];
+      if (key === null || !key.startsWith("w:")) continue;
+      const mu = this.muHat(slot);
+      if (mu > 0) words.push({ w: key.slice(2), mu });
+    }
+    words.sort((a, b) => b.mu - a.mu);
+    const next = new Set<string>();
+    for (let i = 0; i < words.length; i++) {
+      if (i < this.cfg.backgroundTopN || words[i].mu >= this.cfg.backgroundShare) next.add(words[i].w);
+      else break;
+    }
+    this.background = next;
+  }
+
+  isBackground(word: string): boolean {
+    return this.background.has(word);
+  }
+
+  // ── 점수 패스 ────────────────────────────────────────────────────
+
+  private scorePass(nowMs: number): TrendSnapshot {
+    const c = this.cfg;
+    const W = (c.windowMin * 60) / c.bucketSec; // 30 버킷
+    const bNow = Math.floor(nowMs / (c.bucketSec * 1000));
+    const minute = Math.floor(nowMs / MIN_MS);
+    const hour = new Date(nowMs).getUTCHours();
+    const g5 = this.posts.sum(bNow, W);
+    const gPrev = this.posts.sum(bNow - W, W);
+    const e5 = this.engages.sum(bNow, W);
+    const ePrev = this.engages.sum(bNow - W, W);
+
+    const evals = new Map<string, Eval>();
+    const hotRank: { key: string; pri: number }[] = [];
+
+    for (const slot of this.tracked.slots()) {
+      const key = this.tracked.keys[slot];
+      if (key === null) continue;
+      const kind = kindOf(key);
+      const st = this.cand.get(key);
+      const watched = st !== undefined && st.state === "active";
+      const x = this.tracked.sum(slot, bNow, W);
+      const ageMin = (nowMs - this.tracked.firstSeenMs[slot]) / MIN_MS;
+      const convergent = isConvergentKind(kind);
+
+      let z: number;
+      let lambda = 0;
+      let phi = c.phiDefault;
+      let muEff = 0;
+      if (convergent) {
+        z = x / c.convergeDiv;
+      } else {
+        const bf = biasFactor(this.alpha, this.tracked.obs[slot]);
+        const hf = this.hourFactor.get(key)?.[hour] ?? 1;
+        muEff = this.tracked.mu[slot] * bf * hf;
+        const vEff = this.tracked.v[slot] * bf * hf * hf;
+        const ex = expectation(muEff, vEff, g5, c.windowMin);
+        // 관측 분이 적은 평소는 불확실하다 — 3분 내내 0이었다고 평소가 0인 건 아니다.
+        // 포아송 상한 몫으로 기대치에 W × κ / 관측분수를 더한다(기억 있는 후보는 ≈0).
+        lambda = ex.lambda + (c.windowMin * c.histPseudo) / Math.max(1, this.tracked.hist[slot]);
+        if (this.tracked.obs[slot] >= c.phiMinObsMin && lambda > 0) phi = phiFrom(ex.v5, lambda, c.phiMin, c.phiMax);
+        z = zScore(x, lambda, phi);
+      }
+      this.tracked.lastZ[slot] = z;
+      if (x > 0 && (z > 0.5 || ageMin < 2 || watched)) hotRank.push({ key, pri: watched ? 1e9 : (ageMin < 2 ? 1e6 : 0) + z });
+
+      const candidate = convergent ? x >= c.minParticipantsLink : z >= c.zEnter;
+      if (!candidate && !watched) continue;
+
+      const h = this.hot.get(key);
+      const as = h?.authorStats(minute) ?? { u: 0, newRatio: 0, topCount: 0, mentions: 0 };
+      const xPrev = this.tracked.sum(slot, bNow - W, W);
+      const a = accelRatio(x, g5, xPrev, gPrev, c.accelEps);
+      const known = this.tracked.known[slot] === 1;
+      const n = noveltyOf(known, ageMin, muEff * g5 * (60 / c.windowMin), c);
+      let lift: number | undefined;
+      if (kind === "c") lift = this.liftFor(key, x, bNow);
+      const topShare = as.mentions > 0 ? as.topCount / Math.max(as.mentions, x) : 1;
+      const inp = {
+        kind,
+        x,
+        lambda,
+        phi,
+        u: as.u,
+        newRatio: as.newRatio,
+        topShare,
+        a,
+        n,
+        background: kind === "w" ? this.background.has(key.slice(2)) : undefined,
+        lift,
+      };
+      const res = evaluate(inp, c);
+      // 평소를 아직 모르는 후보(기억 없음 & 실제 관측 3분 미만)는 점수는 내되 진입시키지 않는다
+      if (!convergent && !known && this.tracked.hist[slot] < MIN_HIST && res.pass) {
+        evals.set(key, { key, kind, x, lambda, u: as.u, newRatio: as.newRatio, topShare, a, n, res: { ...res, pass: false, fail: "learning" } });
+      } else {
+        evals.set(key, { key, kind, x, lambda, u: as.u, newRatio: as.newRatio, topShare, a, n, res });
+      }
+    }
+
+    // 포섭 — w:court 언급의 절반 이상이 b:supreme court면 단어는 뺀다
+    for (const e of evals.values()) {
+      if (e.kind !== "b") continue;
+      for (const w of e.key.slice(2).split(" ")) {
+        const we = evals.get(`w:${w}`);
+        if (we !== undefined && e.x >= c.subsumeFrac * we.x && we.res.pass) {
+          we.res = { ...we.res, pass: false, fail: "subsumed" };
+        }
+      }
+    }
+
+    // 참여 대상 p:
+    const engSlots = this.engage.top(ENGAGE_EVAL_TOP, minute, c.engageShortMin);
+    for (const [key, st] of this.cand) {
+      if (st.state === "active" && key.startsWith("p:")) {
+        const s = this.engage.slotOf(key);
+        if (s >= 0 && !engSlots.includes(s)) engSlots.push(s);
+      }
+    }
+    const spreading: SpreadingPost[] = [];
+    const engageHotNext: string[] = [];
+    for (const slot of engSlots) {
+      const key = this.engage.keys[slot];
+      if (key === null) continue;
+      const st = this.engage.stats(slot, minute, c.engageShortMin);
+      if (engageHotNext.length < ENGAGE_HOT) engageHotNext.push(key);
+      const a = accelRatio(st.p5, e5, st.pPrev5, ePrev, c.accelEps);
+      const ageMin = (nowMs - this.engage.firstSeenMs(slot)) / MIN_MS;
+      const n = noveltyOf(false, ageMin, 0, c);
+      const inp = { kind: "p" as const, x: st.p5, lambda: 0, phi: 0, u: st.p5, newRatio: 1, topShare: st.p5 > 0 ? 1 / st.p5 : 1, a, n };
+      const res = evaluate(inp, c);
+      if (st.p5 >= c.minParticipantsEngage || this.cand.get(key)?.state === "active") {
+        evals.set(key, { key, kind: "p", x: st.p5, lambda: 0, u: st.p5, newRatio: 1, topShare: inp.topShare, a, n, res });
+      }
+      if (st.p5 >= SPREADING_MIN) {
+        const uri = key.slice(2);
+        spreading.push({ uri, url: bskyUrl(uri), score: res.score, p5: st.p5, p30: st.p30, votes30: st.votes30, a, lifecycle: res.lifecycle, eventId: null });
+      }
+    }
+    // p: 핫 집합 갱신
+    for (const k of [...this.hotEngage.keys()]) if (!engageHotNext.includes(k) && this.cand.get(k)?.state !== "active") this.hotEngage.delete(k);
+    for (const k of engageHotNext) {
+      if (!this.hotEngage.has(k)) this.hotEngage.set(k, new HotInfo(nowMs, 500, c.hotRecentPosts, c.hotPostIdCap, c.hotLinkSlots));
+    }
+
+    // 히스테리시스
+    this.evaluated = evals.size;
+    this.passed = 0;
+    for (const e of evals.values()) {
+      if (e.res.pass) this.passed++;
+      this.stepState(e, nowMs);
+    }
+    for (const [key, st] of this.cand) {
+      if (evals.has(key)) continue;
+      if (st.state === "active") {
+        // 평가에서 빠졌다 = 언급이 0이 됐거나 추적에서 사라졌다 → 퇴출
+        st.state = "past";
+        st.exitedAt = nowMs;
+      } else if (st.state === "idle") {
+        this.cand.delete(key);
+      } else if (nowMs - st.exitedAt > c.pastKeepMin * MIN_MS) {
+        this.cand.delete(key);
+      }
+    }
+
+    // 핫 집합 갱신 — 진입 > 갓 승격 > z 순, 상한 hotCap
+    hotRank.sort((x, y) => y.pri - x.pri);
+    const keep = new Set<string>();
+    for (let i = 0; i < hotRank.length && i < c.hotCap; i++) keep.add(hotRank[i].key);
+    for (const k of [...this.hot.keys()]) if (!keep.has(k)) this.hot.delete(k);
+    for (const k of keep) this.makeHot(k, nowMs);
+
+    const events = this.buildEvents(evals, nowMs, bNow, minute);
+    // 퍼지는 글 — 이벤트 소속 표시
+    spreading.sort((x, y) => y.score - x.score || y.p5 - x.p5);
+    const spreadTop = spreading.slice(0, c.spreadingMax);
+    this.spreadingKeys = new Map();
+    for (const s of spreadTop) {
+      s.eventId = this.eventOfKey.get(`p:${s.uri}`) ?? null;
+      this.spreadingKeys.set(`p:${s.uri}`, s.eventId);
+    }
+
+    const sessionMin = this.sessionMinutes(nowMs);
+    return {
+      ts: nowMs,
+      events,
+      spreading: spreadTop,
+      learning: { active: this.learning(nowMs), minutes: Math.floor(sessionMin), hasPrior: this.hasPrior },
+      stats: this.stats(g5),
+    };
+  }
+
+  private liftFor(key: string, xab: number, bNow: number): number {
+    const [a] = key.slice(2).split("|");
+    const slotA = this.tracked.slotOf(`w:${a}`);
+    const slotAb = this.tracked.slotOf(key);
+    if (slotA < 0 || slotAb < 0) return 0;
+    const W = (this.cfg.windowMin * 60) / this.cfg.bucketSec;
+    const xa = this.tracked.sum(slotA, bNow, W);
+    return liftOf(xab, xa, this.muHat(slotAb), this.muHat(slotA));
+  }
+
+  private stepState(e: Eval, nowMs: number): void {
+    let st = this.cand.get(e.key);
+    if (st === undefined) {
+      if (!e.res.pass || e.res.score < this.cfg.scoreEnter) return;
+      st = newCandState();
+      this.cand.set(e.key, st);
+    }
+    // 학습 중(prior 없음 & 세션 초반)에는 평소를 모르므로 진입시키지 않는다
+    stepHysteresis(st, e.res, nowMs, this.cfg, !this.learning(nowMs));
+  }
+
+  // ── 이벤트 ──────────────────────────────────────────────────────
+
+  private postSet(key: string): Map<number, number> | undefined {
+    return key.startsWith("p:") ? this.hotEngage.get(key)?.postIds : this.hot.get(key)?.postIds;
+  }
+
+  private infoOf(key: string): HotInfo | undefined {
+    return key.startsWith("p:") ? this.hotEngage.get(key) : this.hot.get(key);
+  }
+
+  private buildEvents(evals: Map<string, Eval>, nowMs: number, bNow: number, minute: number): TrendEvent[] {
+    const c = this.cfg;
+    const activeKeys: string[] = [];
+    for (const [k, st] of this.cand) if (st.state === "active" && evals.has(k)) activeKeys.push(k);
+    const activeSet = new Set(activeKeys);
+    const others = [...evals.values()]
+      .filter((e) => !activeSet.has(e.key) && e.res.pass)
+      .sort((x, y) => y.res.score - x.res.score)
+      .slice(0, c.clusterTopN)
+      .map((e) => e.key);
+    const nodes = [...activeKeys, ...others];
+    const sets = nodes.map((k) => this.postSet(k) ?? new Map<number, number>());
+    const groups = clusterBySets(sets, c.overlapMin, c.overlapMinSet);
+
+    const prevOf = this.eventOfKey;
+    const nextOf = new Map<string, number>();
+    const usedIds = new Set<number>();
+    const built: TrendEvent[] = [];
+
+    const comps = groups
+      .map((g) => g.map((i) => nodes[i]))
+      .filter((keys) => keys.some((k) => activeSet.has(k)))
+      .map((keys) => keys.sort((x, y) => (evals.get(y)?.res.score ?? 0) - (evals.get(x)?.res.score ?? 0)))
+      .sort((x, y) => (evals.get(y[0])?.res.score ?? 0) - (evals.get(x[0])?.res.score ?? 0));
+
+    for (const keys of comps) {
+      // ID 승계: 점수 높은 멤버부터 직전 이벤트 ID를 찾는다
+      let id = -1;
+      for (const k of keys) {
+        const prev = prevOf.get(k);
+        if (prev !== undefined && !usedIds.has(prev)) {
+          id = prev;
+          break;
+        }
+      }
+      if (id < 0) id = this.nextEventId++;
+      usedIds.add(id);
+      const prevCard = this.events.get(id);
+      const card = this.makeCard(id, keys, activeSet, evals, nowMs, bNow, minute, prevCard);
+      for (const k of keys) if (activeSet.has(k)) nextOf.set(k, id);
+      this.events.set(id, card);
+      built.push(card);
+    }
+    this.eventOfKey = nextOf;
+
+    // 지나간 이벤트: 직전에 active였는데 이번에 안 나온 것 — 멤버가 다른 이벤트로 합쳐진 게
+    // 아니라 전부 퇴출됐을 때만 '지나간 트렌드'로 남긴다
+    for (const [id, card] of this.events) {
+      if (usedIds.has(id)) continue;
+      if (card.state === "active") {
+        const merged = card.members.some((m) => m.active && nextOf.has(m.key));
+        if (merged) {
+          this.events.delete(id);
+          continue;
+        }
+        card.state = "past";
+        card.exitedAt = nowMs;
+      }
+      if (card.exitedAt !== null && nowMs - card.exitedAt > c.pastKeepMin * MIN_MS) this.events.delete(id);
+    }
+
+    const active = built.sort((x, y) => y.score - x.score).slice(0, c.maxEvents);
+    const past = [...this.events.values()]
+      .filter((e) => e.state === "past")
+      .sort((x, y) => (y.exitedAt ?? 0) - (x.exitedAt ?? 0))
+      .slice(0, Math.max(0, c.maxEvents - active.length));
+    return [...active, ...past];
+  }
+
+  private makeCard(
+    id: number,
+    keys: string[],
+    activeSet: Set<string>,
+    evals: Map<string, Eval>,
+    nowMs: number,
+    bNow: number,
+    minute: number,
+    prev: TrendEvent | undefined,
+  ): TrendEvent {
+    const c = this.cfg;
+    const members: TrendMember[] = keys.map((k) => {
+      const e = evals.get(k);
+      return {
+        key: k,
+        kind: kindOf(k),
+        label: labelOf(k),
+        score: e?.res.score ?? 0,
+        z: e?.res.z ?? 0,
+        u: e?.u ?? 0,
+        active: activeSet.has(k),
+      };
+    });
+    const top = evals.get(keys[0]);
+    // 제목: 가장 구체적인 멤버 — 해시태그 > bigram > 짝 > 단어 > 링크 > 인용 > 글, 같은 종류면 점수순
+    const rank: Record<CandidateKind, number> = { h: 0, b: 1, c: 2, w: 3, u: 4, d: 5, q: 6, p: 7 };
+    const titleMember = [...members].sort((x, y) => rank[x.kind] - rank[y.kind] || y.score - x.score)[0];
+
+    // 대표 글
+    const seen = new Map<string, { post: RecentPost; count: number }>();
+    for (const k of keys) {
+      const h = this.infoOf(k);
+      if (h === undefined) continue;
+      for (const p of h.recent) {
+        const id2 = `${p.did}/${p.rkey}`;
+        const cur = seen.get(id2);
+        if (cur === undefined) seen.set(id2, { post: p, count: 1 });
+        else cur.count++;
+      }
+    }
+    const all = [...seen.values()];
+    const multi = all.filter((x) => x.count >= 2 && x.post.rkey !== "");
+    let reps: RecentPost[];
+    if (multi.length > 0) {
+      const eng = (p: RecentPost): number => {
+        const s = this.engage.slotOf(`p:${postUri(p.did, p.rkey)}`);
+        return s >= 0 ? this.engage.stats(s, minute, c.engageShortMin).p5 : 0;
+      };
+      reps = multi.sort((x, y) => eng(y.post) - eng(x.post) || y.post.timeMs - x.post.timeMs).slice(0, 2).map((x) => x.post);
+    } else {
+      reps = [];
+      const authors = new Set<string>();
+      for (const x of all.filter((x) => x.post.rkey !== "").sort((p, q) => q.post.timeMs - p.post.timeMs)) {
+        if (authors.has(x.post.did)) continue;
+        authors.add(x.post.did);
+        reps.push(x.post);
+        if (reps.length >= 2) break;
+      }
+    }
+    const representativePosts: TrendPost[] = reps.map((p) => ({
+      did: p.did,
+      rkey: p.rkey,
+      text: p.text,
+      timeMs: p.timeMs,
+      url: `https://bsky.app/profile/${p.did}/post/${p.rkey}`,
+      langs: p.langs,
+    }));
+
+    // 링크: u: 멤버, 아니면 멤버 최근 글의 30% 이상이 같은 URL
+    let link: TrendEvent["link"] = null;
+    const uMember = members.find((m) => m.kind === "u");
+    if (uMember !== undefined) {
+      const n = normalizeUrl(`https://${uMember.key.slice(2)}`);
+      if (n !== null) link = n;
+    }
+    if (link === null) {
+      for (const k of keys) {
+        const tl = this.infoOf(k)?.topLink();
+        if (tl !== null && tl !== undefined && tl.frac >= c.linkAttachFrac) {
+          const n = normalizeUrl(`https://${tl.url}`);
+          if (n !== null) {
+            link = n;
+            break;
+          }
+        }
+      }
+    }
+
+    // 관련 단어: 다른 멤버 + 멤버 글에 자주 함께 나온 단어 상위 3
+    const memberWords = new Set(members.flatMap((m) => m.label.toLowerCase().split(/[ ·|#]+/)));
+    const freq = new Map<string, number>();
+    const buf: (string | null)[] = [];
+    for (const { post } of all) {
+      wordStream(post.text, post.langs, buf);
+      const uniq = new Set(buf.filter((w): w is string => w !== null && !memberWords.has(w) && !this.background.has(w)));
+      for (const w of uniq) freq.set(w, (freq.get(w) ?? 0) + 1);
+    }
+    const coWords = [...freq.entries()]
+      .filter(([, n]) => n >= 2)
+      .sort((x, y) => y[1] - x[1])
+      .slice(0, 3)
+      .map(([w]) => w);
+    const related = [...members.filter((m) => m !== titleMember).map((m) => m.label), ...coWords].slice(0, c.relatedMax + 3);
+
+    // 언어
+    const langCount = new Map<string, number>();
+    for (const k of keys) {
+      const h = this.infoOf(k);
+      if (h === undefined) continue;
+      for (const [l, v] of h.langs) langCount.set(l, (langCount.get(l) ?? 0) + v);
+    }
+    const langs = [...langCount.entries()].sort((x, y) => y[1] - x[1]).slice(0, 2).map(([l]) => l);
+
+    // 스파크라인 — 최고 점수 멤버
+    let spark: number[] = [];
+    const topKey = keys[0];
+    const tslot = this.tracked.slotOf(topKey);
+    if (tslot >= 0) {
+      this.tracked.spark(tslot, bNow, c.buckets, 30, this.spk);
+      spark = this.spk.slice();
+    } else if (topKey.startsWith("p:")) {
+      const s = this.engage.slotOf(topKey);
+      if (s >= 0) {
+        // p:는 분 해상도 — 15분을 30포인트로(포인트당 30초, 분 값을 반씩)
+        for (let m = minute - 14; m <= minute; m++) {
+          const st = this.engage.stats(s, m, 1).p5 / 2;
+          spark.push(st, st);
+        }
+      }
+    }
+
+    const titleKind = titleMember.kind;
+    const pUri = titleKind === "p" || titleKind === "q" ? titleMember.key.slice(2) : null;
+    let title = titleMember.label;
+    if (pUri !== null) {
+      // 글 제목은 UI가 하이드레이션한다 — 그 전까지는 대표 글 앞부분 또는 짧은 표기
+      title = reps[0]?.text.slice(0, 60) || `글 ${pUri.split("/").pop() ?? ""}`;
+    } else if (titleKind === "u") {
+      title = titleMember.label.replace(/^[^/]+\//, (d) => d).slice(0, 80);
+    }
+
+    const lambda = top?.lambda ?? 0;
+    const x = top?.x ?? 0;
+    const st = this.cand.get(keys[0]);
+    return {
+      id,
+      colorIdx: (id - 1) % PALETTE,
+      state: "active",
+      title,
+      titleKey: titleMember.key,
+      titleKind,
+      related,
+      members,
+      score: top?.res.score ?? 0,
+      lifecycle: (top?.res.lifecycle ?? "peak") as Lifecycle,
+      spark,
+      representativePosts,
+      link,
+      stats: {
+        mult: (x + 1) / (lambda + 1),
+        u: top?.u ?? 0,
+        newRatio: top?.newRatio ?? 0,
+        a: top?.a ?? 1,
+        isNew: (top?.n ?? 1) >= c.noveltyNew,
+      },
+      langs,
+      enteredAt: prev?.enteredAt ?? st?.enteredAt ?? nowMs,
+      exitedAt: null,
+      postUri: pUri,
+    };
+  }
+
+  /** 후보 키들 → 소속 이벤트(진입 멤버 기준). 스웜 커서의 목적지 */
+  eventFor(keys: readonly string[]): { eventId: number; key: string } | null {
+    for (const k of keys) {
+      const id = this.eventOfKey.get(k);
+      if (id !== undefined) return { eventId: id, key: k };
+    }
+    return null;
+  }
+
+  stats(g5 = 0): TrendStats {
+    const d = this.dedup.stats();
+    let hotBytes = 0;
+    for (const h of this.hot.values()) hotBytes += h.bytes();
+    for (const h of this.hotEngage.values()) hotBytes += h.bytes();
+    return {
+      tracked: this.tracked.size,
+      trackedCap: this.cfg.trackedCap,
+      hot: this.hot.size,
+      engage: this.engage.size,
+      engageCap: this.cfg.engageCap,
+      background: this.background.size,
+      trackedEvicted: this.tracked.evicted,
+      engageEvicted: this.engage.evicted,
+      muted: d.muted,
+      mutedEvents: d.mutedEvents,
+      dupDropped: d.dupDropped,
+      staleDropped: this.staleDropped,
+      posts5m: g5,
+      approxBytes:
+        this.cms.bytes() +
+        this.tracked.bytes() +
+        this.engage.bytes() +
+        hotBytes +
+        this.memory.size * 90 +
+        d.pairsThisMinute * 24 +
+        this.cand.size * 80,
+      scoreMs: this.scoreMs,
+      evaluated: this.evaluated,
+      passed: this.passed,
+      active: [...this.cand.values()].filter((s) => s.state === "active").length,
+    };
+  }
+
+  // ── 테스트·도구용 관찰 ────────────────────────────────────────────
+
+  /** 추적 중 후보의 현재 평소 점유율 μ̂ (bias 보정 후) — 없으면 null */
+  baselineOf(key: string): number | null {
+    const s = this.tracked.slotOf(key);
+    return s < 0 ? null : this.muHat(s);
+  }
+
+  stateOf(key: string): "idle" | "active" | "past" | null {
+    return this.cand.get(key)?.state ?? null;
+  }
+
+  backgroundWords(): string[] {
+    return [...this.background];
+  }
+
+  /** prior 빌드용 — 추적 중인 모든 비수렴 후보의 (μ̂, φ̂) */
+  exportBaselines(postsPerMinute: number): { key: string; mu: number; phi: number; obs: number }[] {
+    const out: { key: string; mu: number; phi: number; obs: number }[] = [];
+    const g = postsPerMinute * this.cfg.windowMin;
+    for (const slot of this.tracked.slots()) {
+      const key = this.tracked.keys[slot];
+      if (key === null || isConvergentKind(kindOf(key))) continue;
+      const bf = biasFactor(this.alpha, this.tracked.obs[slot]);
+      const mu = this.tracked.mu[slot] * bf;
+      if (!(mu > 0)) continue;
+      const { lambda, v5 } = expectation(mu, this.tracked.v[slot] * bf, g, this.cfg.windowMin);
+      out.push({ key, mu, phi: phiFrom(v5, lambda, this.cfg.phiMin, this.cfg.phiMax), obs: this.tracked.obs[slot] });
+    }
+    return out;
+  }
+}

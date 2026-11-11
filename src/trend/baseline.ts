@@ -8,9 +8,12 @@
 // prior가 없는 후보는 0에서 출발하므로 bias 보정 μ̂ = μ / (1 − (1−α)^n). n은 "그 후보가 0을
 // 포함해 관측된 것으로 치는 분 수" — 세션 경과 분(+ prior 가중)이다.
 
-export function ewmaUpdate(mu: number, v: number, s: number, alpha: number): { mu: number; v: number } {
+export function ewmaUpdate(mu: number, v: number, s: number, alpha: number, vClamp = Infinity): { mu: number; v: number } {
   const d = s - mu;
-  return { mu: mu + alpha * d, v: (1 - alpha) * (v + alpha * d * d) };
+  // 분산 갱신에만 δ를 ±vClamp로 자른다(윈저라이즈). 사건 하나가 v를 부풀려 φ를 키우면
+  // 그 사건이 진행되는 동안 스스로 z를 깎아 조기 퇴출된다 — μ는 지시서 식 그대로 따라간다.
+  const dv = Math.max(-vClamp, Math.min(vClamp, d));
+  return { mu: mu + alpha * d, v: (1 - alpha) * (v + alpha * dv * dv) };
 }
 
 /** EWMA bias 보정 계수의 역수 — 1 / (1 − (1−α)^n). n ≤ 0이면 0(정보 없음) */
