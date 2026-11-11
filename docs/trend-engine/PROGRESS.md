@@ -77,3 +77,4 @@
 - verify 스킬 라이브 검증(dev :3010, 실제 Jetstream): prior loaded·학습 아님, Mix 합계 불변식, Pause 동결, degraded 진입(M=3)·복귀, long task 0, 콘솔 에러 0, 프레임당 33µs·부하 2%.
 - 정리: README·verify 스킬·설계 문서 머리말, FINAL_REPORT.md.
 - 최종 게이트: typecheck 0 / lint 0 error(기존 경고 1) / unit 117 / build OK / e2e 9.
+- push 실패(GitHub 인증 없음, gh 없음) — FINAL_REPORT 8장에 사람이 할 명령을 남김.

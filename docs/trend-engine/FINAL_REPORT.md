@@ -15,7 +15,7 @@
 | 콘솔 에러 0, reduced-motion·모바일 폭 | **e2e로 검증**(1440·900·390px, reduced-motion) |
 | 워커 메모리 40MB 이하, 처리량 회귀 없음 | 메모리 **26.2MB**(GC 후 유지, 피크 28.6MB). 처리량은 **이벤트당 비용이 1.35µs → 5.17µs로 늘었다** — 아래 4장 |
 | PLAN/PROGRESS/DECISIONS/FINAL_REPORT | 최신 |
-| 브랜치 push, main 무변경 | push·PR은 이 보고서 커밋 직후(8장) |
+| 브랜치 push, main 무변경 | main 무변경 ✅ / **push·PR 실패** — 이 환경에 GitHub 인증이 없고 `gh` CLI가 없다(8장) |
 
 ## 2. 구현한 것
 
@@ -112,5 +112,10 @@
 
 ## 8. 배포
 
-- 커밋: 마일스톤별(M0~M12). main 무변경.
-- push: `origin/feat/trend-engine`. PR: `main` 대상, **머지하지 않음**.
+- 커밋: 마일스톤별 13개(M0~M12), 로컬 브랜치 `feat/trend-engine`. main 무변경(7d78c1c).
+- **push 실패**: `git push -u origin feat/trend-engine` → `fatal: could not read Username for 'https://github.com'`. `gh` CLI도 설치돼 있지 않아 PR을 만들지 못했다. 사람이 할 일:
+  ```bash
+  git push -u origin feat/trend-engine
+  # PR: base main ← feat/trend-engine, 머지하지 말 것. 본문은 이 보고서 1·4·6장 요약이면 충분하다.
+  ```
+- 라이브 검증(verify 스킬, dev :3010, 실제 Jetstream): prior loaded·학습 아님, Mix 합계 불변식(676=676), Pause 중 워커 계속·화면 동결, degraded 진입(M=3)·자동 복귀, long task 0, 콘솔 에러 0, 프레임당 33µs·부하 2%.
