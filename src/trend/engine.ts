@@ -713,8 +713,9 @@ export class TrendEngine {
           this.events.delete(id);
           continue;
         }
-        card.state = "past";
-        card.exitedAt = nowMs;
+        // 이미 내보낸 스냅샷의 객체는 건드리지 않는다 — 복사본으로 상태를 바꾼다
+        this.events.set(id, { ...card, state: "past", exitedAt: nowMs });
+        continue;
       }
       if (card.exitedAt !== null && nowMs - card.exitedAt > c.pastKeepMin * MIN_MS) this.events.delete(id);
     }
