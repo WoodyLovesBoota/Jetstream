@@ -88,9 +88,9 @@ export const FIXTURES: Record<string, FixtureScenario> = {
           // 접속 몇 초 뒤 떠오름
           {
             text: (_i, r) => `#WorldCupFinal penalty shootout ${["unreal", "goal", "keeper", "crowd"][Math.floor(r() * 4)]}`,
-            startMs: now + 4_000,
+            startMs: now + 2_000,
             endMs: now + 6 * 3600_000,
-            perMin: (t) => Math.min(60, 12 + ((t - now) / 1000) * 1.2),
+            perMin: (t) => Math.min(90, 30 + ((t - now) / 1000) * 2),
             authors: 9000,
             authorPrefix: "wc",
             hashtags: ["WorldCupFinal"],

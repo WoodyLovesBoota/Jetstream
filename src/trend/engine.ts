@@ -958,7 +958,9 @@ export class TrendEngine {
       .sort((x, y) => y[1] - x[1])
       .slice(0, 3)
       .map(([w]) => w);
-    const related = [...members.filter((m) => m !== titleMember).map((m) => m.label), ...coWords].slice(0, c.relatedMax + 3);
+    // 링크·글 멤버는 링크 칸·제목이 따로 보여 주므로 관련 단어에서 뺀다
+    const relatedLabels = members.filter((m) => m !== titleMember && m.kind !== "u" && m.kind !== "d" && m.kind !== "p" && m.kind !== "q").map((m) => m.label);
+    const related = [...new Set([...relatedLabels, ...coWords])].slice(0, c.relatedMax + 3);
 
     // 언어
     const langCount = new Map<string, number>();
@@ -1132,6 +1134,16 @@ export class TrendEngine {
 
   backgroundWords(): string[] {
     return [...this.background];
+  }
+
+  /** 언어별 평소 post 점유율(bias 보정 후) — prior의 langShare */
+  languageShares(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const [l, m] of this.langMu) {
+      const v = m.mu * biasFactor(this.alpha, m.n);
+      if (v > 0.0005) out[l] = v;
+    }
+    return out;
   }
 
   /** prior 빌드용 — 추적 중인 모든 비수렴 후보의 (μ̂, φ̂) */

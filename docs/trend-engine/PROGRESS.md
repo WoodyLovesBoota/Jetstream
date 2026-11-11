@@ -59,3 +59,8 @@
 - 공개 AppView CORS 확인: `access-control-allow-origin: *`.
 - 엔진 쪽 p: 줄 세우기(퍼지는 글 상위 20, 이벤트 소속, 세션 본문 LRU)는 M7에서 완료.
 - 다음: M9 build-prior·inject.
+### M10 — 스웜 UI (진행 중, 중간 커밋)
+- 순수 모듈 `lib/swarm/motion.ts`(레퍼런스 수치: 이동 시간·휨·smootherstep·드래그 이징·스프링 k38/d8.5/2200·공전 호흡·타이핑 간격·반발), `lib/swarm/layout.ts`(점수 순 L/M/S 격자 배치). 테스트 10건.
+- `components/swarm/controller.ts`: 커서 풀 150, 샘플 post → 커서(이벤트 색·라벨, 무소속은 일부만 흐리게 떠돌다 퇴장), 카드 생성 시 커서가 좌상단→우하단 드래그로 clip-path를 열고(선택 박스+크기 배지) 다른 커서가 I-beam으로 제목 타이핑, 공전 군집(스프링·반발), 밀도 보충(목표 = U/5), 식는 이벤트 도착 절반·공전 수명 단축, 퇴출 시 흩어짐, 참여 핑 클릭 링, 커서 히트 테스트 미리보기, 카드 상세 서랍.
+- `Toolbar`(연결·필터·Pause·아바타 스택·진단 토글), `HudPill`, `Shell`(접는 진단 패널 — 기존 Pulse·Gauges·Tape·Mix·HUD를 밝은 시트로), 탭(이벤트/퍼지는 글 + getPosts 하이드레이터 연결), 전역 `app/swarm.css`(다크 크롬 토큰, Inter).
+- 픽스처 모드에서 실브라우저 확인: 카드 3개가 커서에 의해 그려지고 공전, 콘솔 에러 0.

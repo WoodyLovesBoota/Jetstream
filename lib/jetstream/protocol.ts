@@ -1,9 +1,9 @@
 // 워커 ↔ 메인 스레드 메시지 계약. postMessage로 오가는 값은 전부 여기 정의된
 // structured clone 가능한 plain 값뿐이다.
 
-import type { EngagePing, TrendSnapshot, TrendStats } from "../../src/trend/types.ts";
+import type { EngagePing, SpreadingPost, TrendEvent, TrendSnapshot, TrendStats } from "../../src/trend/types.ts";
 
-export type { EngagePing, TrendSnapshot, TrendStats };
+export type { EngagePing, SpreadingPost, TrendEvent, TrendSnapshot, TrendStats };
 
 /**
  * 공식 Jetstream 인스턴스 — us-east/us-west 각 2대. 재연결이 거듭 실패하면 이 순서로

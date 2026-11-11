@@ -240,7 +240,7 @@ async function initTrend(): Promise<void> {
 function tagFor(keys: readonly string[], did: string): { tag: string; eventId: number | null } {
   const hit = engine?.eventFor(keys) ?? null;
   if (hit !== null) return { tag: labelOf(hit.key).slice(0, 28), eventId: hit.eventId };
-  for (const prefix of ["h:", "b:", "w:"]) {
+  for (const prefix of ["h:", "w:", "b:"]) {
     const k = keys.find((x) => x.startsWith(prefix) && !(prefix === "w:" && engine?.isBackground(x.slice(2)) === true));
     if (k !== undefined) return { tag: labelOf(k).slice(0, 28), eventId: null };
   }
@@ -484,7 +484,7 @@ function takeSnapshot(): StreamSnapshot {
   // 픽스처 모드엔 소켓이 없다 — 화면이 "끊김"으로 보이지 않게 live로 보고하고 인스턴스 자리에 이름을 싣는다
   const conn =
     trendStatus.fixture !== null
-      ? { ...realConn, state: "live" as const, instance: `fixture:${trendStatus.fixture}`, lagSec: 0, attempt: 0, retryInMs: 0 }
+      ? { ...realConn, state: "live" as const, instance: `fixture:${trendStatus.fixture}`, lagSec: 0, attempt: 0, retryInMs: 0, filter: "filtered" as const }
       : realConn;
 
   return {

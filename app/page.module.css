@@ -1,103 +1,35 @@
 /*
- * 한 장의 기록지. 구획 사이 간격(gap) 없이 괘선 1px로만 나눈다 — 카드 더미가 아니라
- * 하나의 계기판으로 읽히게. 1280px 이상에서는 단일 화면(무스크롤).
+ * 진단 패널 안의 기록지 시트 — 기존 계기(Pulse·게이지·Tape·Mix·HUD)를 밝은 종이 그대로 세로로 쌓는다.
+ * canvas 차트가 기록지 색 상수(lib/palette.ts)로 그려지므로 이 시트만 라이트 토큰을 쓴다.
  */
-.deck {
+.sheet {
   display: flex;
   flex-direction: column;
-  height: 100dvh;
+  min-height: 100%;
   background: var(--paper);
+  color: var(--ink);
+  color-scheme: light;
 }
 
-/* 본문 랜드마크 — 기록계 + 메인 그리드를 세로로 쌓는다 */
-.main {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-/*
- * 기록계 — 머리줄(펜 리드아웃) + 모눈 스트립 차트. 반드시 **정해진 높이**여야 한다:
- * 내부 차트가 height: 100% 체인으로 이 값을 받아 가므로, auto가 되는 순간 차트
- * 높이가 0으로 붕괴한다(좁은 창에서 실측 1px로 재현됐던 회귀).
- */
+/* 기록계 — 차트가 height:100% 체인으로 받으므로 반드시 정해진 높이 */
 .pulse {
   flex: none;
-  height: clamp(290px, 33vh, 370px);
+  height: 340px;
   border-bottom: 1px solid var(--rule);
 }
 
-/* 차트는 시트 가장자리 가까이까지 펼친다 — 기록지가 흘러가는 폭이 곧 시간축이다.
-   Panel의 구조상 몸통은 header 다음의 마지막 div다(클래스는 해시라 구조로 잡는다). */
 .pulse > div:last-child {
   padding: 2px 14px 10px var(--pad);
 }
 
-/* 메인 그리드 — Surge가 주인공(좌), 우 컬럼에 Tape · Mix */
-.grid {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
-}
-
-.surge {
-  min-height: 0;
-  border-right: 1px solid var(--rule);
-}
-
-.side {
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  /* 세로가 짧은 화면에서 Mix 고정 높이가 Tape를 0으로 찌부러뜨리지 않도록 컬럼 안에서만
-     스크롤해 흡수한다 — 데크 전체 단일 화면은 그대로 둔다. */
-  overflow-y: auto;
-}
-
 .tape {
-  flex: 1;
-  /* Mix에 밀려도 이 아래로는 안 줄어든다 — 라이브 테이프가 항상 읽히는 최소치(≈3행) */
-  min-height: 240px;
+  flex: none;
+  height: 320px;
+  border-bottom: 1px solid var(--rule);
 }
 
-/* 9행(상위 8 + 기타) × 행높이 + 머리줄이 겹치지 않는 최소치 */
 .mix {
   flex: none;
   height: 252px;
-  border-top: 1px solid var(--rule);
-}
-
-@media (max-width: 1279.98px) {
-  .deck {
-    height: auto;
-    min-height: 100dvh;
-  }
-
-  /* .pulse는 전역 clamp 높이를 그대로 쓴다 — auto로 풀면 차트가 0으로 붕괴한다 */
-
-  .grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .surge {
-    /* 10행 × 40px + 탭·컬럼헤드·상태줄 크롬 */
-    min-height: 600px;
-    border-right: none;
-    border-bottom: 1px solid var(--rule);
-  }
-
-  .tape {
-    flex: none;
-    height: 400px;
-  }
-}
-
-@media (max-width: 767.98px) {
-  /* 리드아웃이 2×2로 쌓이며 머리줄이 길어진다 — 그만큼 기록계 높이를 늘려 차트를 지킨다 */
-  .pulse {
-    height: 440px;
-  }
+  border-bottom: 1px solid var(--rule);
 }
