@@ -22,3 +22,6 @@
 - `@playwright/test` 1.65.0 + chromium-1254 설치, `playwright.config.ts`(next start :3123).
 - 녹화기 `scripts/record.ts` + `src/trend/slim.ts` 선행 작성. 60분 실녹화 백그라운드 시작 → `recordings/live-60m.jsonl.gz` (로그 `recordings/record.log`).
 - 다음: M1 후보 추출.
+### M1 — 후보 추출 ✅
+- `src/trend/{config,hash,url,korean,extract}.ts`. 테스트 17건(영·한·중·일, bigram 경계, 짝, URL 정규화, slimEvent).
+- typecheck/lint(기존 경고 1) 통과. 다음: M2 중복 제거·봇.

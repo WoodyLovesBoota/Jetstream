@@ -10,10 +10,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "record": "node scripts/record.ts",
-    "replay": "node scripts/replay.ts",
-    "build-prior": "node scripts/build-prior.ts",
-    "inject": "node scripts/inject.ts"
+    "record": "node --no-warnings scripts/record.ts",
+    "replay": "node --no-warnings scripts/replay.ts",
+    "build-prior": "node --no-warnings scripts/build-prior.ts",
+    "inject": "node --no-warnings scripts/inject.ts"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.6",
