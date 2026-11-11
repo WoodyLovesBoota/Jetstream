@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# trend-engine 녹화본 (용량 큼 — 커밋하지 않는다)
+/recordings/
