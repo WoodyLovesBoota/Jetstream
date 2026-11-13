@@ -150,3 +150,47 @@ describe("퍼지는 글", () => {
     expect(last?.events.some((e) => e.members.some((m) => m.kind === "p"))).toBe(false);
   });
 });
+
+describe("관찰 카드(트렌드 판정 전)", () => {
+  const start = T0 + 12 * MIN;
+  const r = run({
+    endMs: T0 + 18 * MIN,
+    topics: [
+      {
+        text: (_i, rr) => `#eclipse2026 total solar eclipse ${["amazing", "wow", "clouds", "photo"][Math.floor(rr() * 4)]}`,
+        startMs: start,
+        endMs: T0 + 18 * MIN,
+        perMin: 25,
+        authors: 5000,
+        authorPrefix: "ecl",
+        hashtags: ["eclipse2026"],
+        langs: ["ja"],
+      },
+    ],
+  });
+
+  it("세션 시작 1분 안에 판정 없이도 카드를 그린다", () => {
+    const early = r.snaps.filter((s) => s.ts <= T0 + MIN);
+    expect(early.some((s) => s.events.some((e) => e.state === "watch"))).toBe(true);
+    for (const s of early) expect(s.events.every((e) => e.state !== "active")).toBe(true);
+  });
+
+  it("관찰 카드는 상한을 지키고 진입 이벤트 뒤·지나간 트렌드 앞에 온다", () => {
+    for (const s of r.snaps) {
+      expect(s.events.filter((e) => e.state === "watch").length).toBeLessThanOrEqual(8);
+      expect(s.events.length).toBeLessThanOrEqual(15);
+      const order = s.events.map((e) => (e.state === "active" ? 0 : e.state === "watch" ? 1 : 2));
+      expect(order).toEqual([...order].sort((a, b) => a - b));
+    }
+  });
+
+  it("관찰 카드가 트렌드가 되면 같은 카드 ID를 이어받는다", () => {
+    const watchSnap = r.snaps.find((s) => s.ts >= start && s.events.some((e) => e.state === "watch" && e.titleKey === "h:eclipse2026"));
+    const activeSnap = r.snaps.find((s) => s.events.some((e) => e.state === "active" && e.members.some((m) => m.key === "h:eclipse2026")));
+    expect(watchSnap).toBeDefined();
+    expect(activeSnap).toBeDefined();
+    const wid = watchSnap?.events.find((e) => e.titleKey === "h:eclipse2026")?.id;
+    const aid = activeSnap?.events.find((e) => e.members.some((m) => m.key === "h:eclipse2026"))?.id;
+    expect(aid).toBe(wid);
+  });
+});

@@ -67,6 +67,19 @@ const POST_TEXT_CAP = 10_000;
 /** 기억 없는 후보가 진입하려면 필요한 실제 관측 분 수 */
 const MIN_HIST = 3;
 
+/** 관찰 카드 후보 — 점수 패스에서 모아 이벤트 빌드 때 고른다 */
+interface WatchCand {
+  key: string;
+  kind: CandidateKind;
+  slot: number;
+  x: number;
+  z: number;
+  lambda: number;
+  phi: number;
+  muEff: number;
+  ageMin: number;
+}
+
 interface MemEntry {
   mu: number;
   v: number;
@@ -118,6 +131,8 @@ export class TrendEngine {
   private readonly cand = new Map<string, CandState>();
   private readonly events = new Map<number, TrendEvent>();
   private eventOfKey = new Map<string, number>();
+  /** 지금 그리고 있는 관찰 카드: 후보 키 → 카드 ID·시작 시각 */
+  private readonly watchIds = new Map<string, { id: number; since: number }>();
   private spreadingKeys = new Map<string, number | null>();
   private nextEventId = 1;
   private readonly hasPrior: boolean;
@@ -542,6 +557,7 @@ export class TrendEngine {
 
     const evals = new Map<string, Eval>();
     const hotRank: { key: string; pri: number }[] = [];
+    const watchPool: WatchCand[] = [];
 
     for (const slot of this.tracked.slots()) {
       const key = this.tracked.keys[slot];
@@ -572,10 +588,15 @@ export class TrendEngine {
         z = zScore(x, lambda, phi);
       }
       this.tracked.lastZ[slot] = z;
-      // 핫 우선순위: 진입 > 퇴출선(z≥2) 위 > 갓 승격 > z. 게이트(U≥8)를 따지는 후보가
+      // 관찰 카드 후보 — 판정 전이라도 지금 많이 나오는 해시태그·구·단어(배경어 제외)
+      if (c.watchMax > 0 && x >= c.watchMinX && (kind === "h" || kind === "b" || (kind === "w" && !this.background.has(key.slice(2))))) {
+        watchPool.push({ key, kind, slot, x, z, lambda, phi, muEff, ageMin });
+      }
+      // 핫 우선순위: 진입·관찰 카드 > 퇴출선(z≥2) 위 > 갓 승격 > z. 게이트(U≥8)를 따지는 후보가
       // 작성자 맵을 잃지 않게, 퇴출선 위는 무조건 핫이다
-      if (x > 0 && (z > 0.5 || ageMin < 2 || watched)) {
-        hotRank.push({ key, pri: watched ? 1e9 : z >= c.zExit ? 1e6 + z : ageMin < 2 ? 1e3 + z : z });
+      const shown = watched || this.watchIds.has(key);
+      if (x > 0 && (z > 0.5 || ageMin < 2 || shown)) {
+        hotRank.push({ key, pri: shown ? 1e9 : z >= c.zExit ? 1e6 + z : ageMin < 2 ? 1e3 + z : z });
       }
 
       const candidate = convergent ? x >= c.minParticipantsLink : z >= c.zEnter;
@@ -711,7 +732,7 @@ export class TrendEngine {
       else break;
     }
 
-    const events = this.buildEvents(evals, nowMs, bNow, minute);
+    const events = this.buildEvents(evals, nowMs, bNow, minute, watchPool, { g5, gPrev, W });
     // 퍼지는 글 — 이벤트 소속 표시
     spreading.sort((x, y) => y.score - x.score || y.p5 - x.p5);
     const spreadTop = spreading.slice(0, c.spreadingMax);
@@ -784,7 +805,14 @@ export class TrendEngine {
     return key.startsWith("p:") ? this.hotEngage.get(key) : this.hot.get(key);
   }
 
-  private buildEvents(evals: Map<string, Eval>, nowMs: number, bNow: number, minute: number): TrendEvent[] {
+  private buildEvents(
+    evals: Map<string, Eval>,
+    nowMs: number,
+    bNow: number,
+    minute: number,
+    watchPool: WatchCand[] = [],
+    win: { g5: number; gPrev: number; W: number } = { g5: 0, gPrev: 0, W: 30 },
+  ): TrendEvent[] {
     const c = this.cfg;
     const activeKeys: string[] = [];
     for (const [k, st] of this.cand) if (st.state === "active" && evals.has(k)) activeKeys.push(k);
@@ -849,11 +877,123 @@ export class TrendEngine {
     }
 
     const active = built.sort((x, y) => y.score - x.score).slice(0, c.maxEvents);
+    const watch = this.buildWatch(watchPool, evals, nextOf, usedIds, active, nowMs, bNow, minute, win);
     const past = [...this.events.values()]
       .filter((e) => e.state === "past")
       .sort((x, y) => (y.exitedAt ?? 0) - (x.exitedAt ?? 0))
-      .slice(0, Math.max(0, c.maxEvents - active.length));
-    return [...active, ...past];
+      .slice(0, Math.max(0, c.maxEvents - active.length - watch.length));
+    return [...active, ...watch, ...past];
+  }
+
+  /**
+   * 관찰 카드 — 트렌드 판정(게이트·히스테리시스·평소 학습)을 기다리지 않고, 지금 많이 나오는 후보를
+   * 바로 카드로 그린다. 평소 대비 놀라움(z)순, 같은 단어를 겹쳐 그리지 않는다. 진입 이벤트가 되면
+   * eventOfKey로 ID를 승계해 같은 카드가 트렌드로 바뀐다. this.events에는 넣지 않는다(지나간 트렌드 아님).
+   */
+  private buildWatch(
+    pool: WatchCand[],
+    evals: Map<string, Eval>,
+    nextOf: Map<string, number>,
+    usedIds: Set<number>,
+    activeCards: TrendEvent[],
+    nowMs: number,
+    bNow: number,
+    minute: number,
+    win: { g5: number; gPrev: number; W: number },
+  ): TrendEvent[] {
+    const c = this.cfg;
+    const room = Math.max(0, Math.min(c.watchMax, c.maxEvents - activeCards.length));
+    const ranked = pool.filter((p) => !nextOf.has(p.key)).sort((x, y) => y.z - x.z || y.x - x.x);
+    const rankOf = new Map(ranked.map((p, i) => [p.key, i]));
+    const byKey = new Map(ranked.map((p) => [p.key, p]));
+
+    const wordsOf = (key: string): string[] => labelOf(key).toLowerCase().replace(/^#/, "").split(" ");
+    const covered = new Set<string>();
+    // 트렌드 카드가 이미 말하고 있는 단어(멤버·관련 단어, 해시태그 안의 단어 포함)는 따로 그리지 않는다
+    for (const ev of activeCards) {
+      for (const m of ev.members) if (m.kind === "w" || m.kind === "b" || m.kind === "h") for (const w of wordsOf(m.key)) covered.add(w);
+      for (const r of ev.related) for (const w of r.toLowerCase().split(/[ ·|#]+/)) if (w !== "") covered.add(w);
+    }
+    // 품질 — 서로 다른 사람들이, 한 명 쏠림·복붙 없이, 평소보다 많이 쓰는 것만
+    const evalCache = new Map<string, Eval>();
+    const evalOf = (p: WatchCand): Eval => {
+      let e = evalCache.get(p.key);
+      if (e === undefined) {
+        e = evals.get(p.key) ?? this.watchEval(p, nowMs, bNow, minute, win);
+        evalCache.set(p.key, e);
+      }
+      return e;
+    };
+    const good = (p: WatchCand): boolean => {
+      if (p.x <= p.lambda) return false;
+      const e = evalOf(p);
+      if (e.u < c.watchMinAuthors || e.topShare > c.watchTopShareMax) return false;
+      const h = this.hot.get(p.key);
+      if (h === undefined) return true;
+      if (isCopypasta(h.recent)) return false;
+      // 소수 계정이 같은 링크를 도배(실데이터: 3명이 xcit.top으로 'vip'·'telegram')
+      const tl = h.topLink();
+      return !(tl !== null && tl.frac >= 0.6 && e.u < 10);
+    };
+    const coveredBy = (w: string): boolean => covered.has(w) || [...covered].some((cw) => cw.length >= 4 && w.length >= 4 && (cw.includes(w) || w.includes(cw)));
+
+    // 이미 그린 카드는 유지 시간 안이거나 아직 상위권이면 남긴다(트렌드 카드와 겹치게 됐으면 뺀다)
+    for (const [key, w] of this.watchIds) {
+      const r = rankOf.get(key);
+      const p = byKey.get(key);
+      const keep =
+        !usedIds.has(w.id) && r !== undefined && p !== undefined && (nowMs - w.since < c.watchHoldMs || r < room * 2) && !wordsOf(key).some(coveredBy) && good(p);
+      if (!keep) this.watchIds.delete(key);
+    }
+    const kept = [...this.watchIds.keys()].sort((x, y) => (rankOf.get(x) ?? 0) - (rankOf.get(y) ?? 0));
+    while (kept.length > room) this.watchIds.delete(kept.pop() as string);
+
+    for (const k of kept) for (const w of wordsOf(k)) covered.add(w);
+    for (const k of nextOf.keys()) if (k.startsWith("w:") || k.startsWith("b:") || k.startsWith("h:")) for (const w of wordsOf(k)) covered.add(w);
+    for (const p of ranked) {
+      const r = rankOf.get(p.key) ?? 0;
+      if (r >= room * 6) break;
+      if (this.watchIds.has(p.key)) continue;
+      const ws = wordsOf(p.key);
+      if (ws.some(coveredBy) || !good(p)) continue;
+      if (this.watchIds.size >= room) {
+        // 꽉 찼으면 지금 상위권(room 안) 후보만, 순위권 밖으로 밀려난 카드를 하나 밀어내고 들어온다
+        if (r >= room) continue;
+        let worst: string | null = null;
+        for (const k of this.watchIds.keys()) if (worst === null || (rankOf.get(k) ?? 0) > (rankOf.get(worst) ?? 0)) worst = k;
+        if (worst === null || (rankOf.get(worst) ?? 0) < room) continue;
+        this.watchIds.delete(worst);
+      }
+      for (const w of ws) covered.add(w);
+      this.watchIds.set(p.key, { id: this.nextEventId++, since: nowMs });
+    }
+
+    const out: TrendEvent[] = [];
+    for (const [key, w] of this.watchIds) {
+      const p = byKey.get(key);
+      if (p === undefined) continue;
+      const e = evalOf(p);
+      const card = this.makeCard(w.id, [key], new Set(), new Map([[key, e]]), nowMs, bNow, minute, undefined);
+      out.push({ ...card, state: "watch", enteredAt: w.since });
+      nextOf.set(key, w.id);
+    }
+    return out.sort((x, y) => (rankOf.get(x.titleKey) ?? 0) - (rankOf.get(y.titleKey) ?? 0));
+  }
+
+  /** 점수 패스에서 평가하지 않은(게이트 후보가 아닌) 관찰 후보의 신호값 — 카드 수치용 */
+  private watchEval(p: WatchCand, nowMs: number, bNow: number, minute: number, win: { g5: number; gPrev: number; W: number }): Eval {
+    const c = this.cfg;
+    const h = this.hot.get(p.key);
+    const as = h?.authorStats(minute) ?? { u: 0, newRatio: 0, topCount: 0, mentions: 0 };
+    const xPrev = this.tracked.sum(p.slot, bNow - win.W, win.W);
+    const a = accelRatio(p.x, win.g5, xPrev, win.gPrev, c.accelEps);
+    const n = noveltyOf(this.tracked.known[p.slot] === 1, p.ageMin, p.muEff * win.g5 * (60 / c.windowMin), c);
+    const topShare = as.mentions > 0 ? as.topCount / Math.max(as.mentions, p.x) : 1;
+    const res = evaluate(
+      { kind: p.kind, x: p.x, lambda: p.lambda, phi: p.phi, u: as.u, newRatio: as.newRatio, topShare, a, n, background: p.kind === "w" ? false : undefined },
+      c,
+    );
+    return { key: p.key, kind: p.kind, x: p.x, lambda: p.lambda, u: as.u, newRatio: as.newRatio, topShare, a, n, res };
   }
 
   private makeCard(

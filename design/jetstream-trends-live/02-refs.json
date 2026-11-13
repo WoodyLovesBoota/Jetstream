@@ -1,0 +1,92 @@
+[
+  {
+    "id": "01",
+    "app": "Modal",
+    "screen": "App Logs (streaming)",
+    "pattern": "live-event-stream",
+    "platform": "web",
+    "mobbin_ref": "https://mobbin.com/screens/1f2f0cd1-eadb-435f-9632-116b03a1fc22",
+    "selection_reason": "Category leader (dev infra). Dark restrained chrome: volume histogram above a monospace timestamped log, single 'Streaming' footer indicator. Model for the new-post tape and bottom live status.",
+    "role": "leader"
+  },
+  {
+    "id": "02",
+    "app": "Cloudflare",
+    "screen": "Workers Observability - Events",
+    "pattern": "live-event-stream",
+    "platform": "web",
+    "mobbin_ref": "https://mobbin.com/screens/cbf28d46-8663-4731-a826-179bc4f0fb16",
+    "selection_reason": "Category leader (observability). Live toggle + segmented time range in a compact toolbar, events histogram with success/error legend, ms-precision timestamp column with thin type tags. Covers toolbar controls and rate chart. (Analyst substituted the same-app Events screen cbf28d46; original id was not retrievable.)",
+    "role": "leader"
+  },
+  {
+    "id": "03",
+    "app": "Cloudflare",
+    "screen": "Account analytics",
+    "pattern": "stat-cards-sparkline",
+    "platform": "web",
+    "mobbin_ref": "https://mobbin.com/screens/5cfd2aab-b900-484e-bca8-7bec7cbdcc27",
+    "selection_reason": "Category leader. Unboxed stat rows (label, big number, hairline area sparkline) grouped in sections, plus labelled horizontal share bars with counts. Direct model for rate gauges and language-share bars in the left rail.",
+    "role": "leader"
+  },
+  {
+    "id": "04",
+    "app": "Supabase",
+    "screen": "Realtime Inspector",
+    "pattern": "live-event-stream",
+    "platform": "web",
+    "mobbin_ref": "https://mobbin.com/screens/89c8f8ca-09a4-496a-87e4-5a735367449c",
+    "selection_reason": "Category leader (dev tools). 'Listening - Found N messages' status line, 'Stop listening' pause control, event-type filter (presence/broadcast/db changes) and a raw-payload side panel. Maps to Pause, filtered/full collection toggle and connection state. (Analyst used same-app, same-screen capture 0c9d733f; listed id not returned by search.)",
+    "role": "leader"
+  },
+  {
+    "id": "05",
+    "app": "Google Analytics",
+    "screen": "Realtime overview",
+    "pattern": "screen-layout",
+    "platform": "web",
+    "mobbin_ref": "https://mobbin.com/screens/2dbe5fa1-b3b3-49c1-8ae9-4dd3b735b699",
+    "selection_reason": "Category leader for realtime analytics. Dense card grid: rank #1 label, count, share %, per-minute micro bar chart and ranked rows under one consistent card anatomy. Reference for trend-card internals and realtime composition.",
+    "role": "leader"
+  },
+  {
+    "id": "06",
+    "app": "Vercel",
+    "screen": "Logs",
+    "pattern": "screen-layout",
+    "platform": "web",
+    "mobbin_ref": "https://mobbin.com/screens/a96b431b-c68c-4bbd-a7e0-6a658e4525e6",
+    "selection_reason": "Category leader. Left filter rail with counts beside a dense table, tabular timestamps with dimmed date / bold time, small Live button in the toolbar. Reference for rail density and timestamp typography. (Analyst used same-app, same-screen capture fba3de4e; listed id not returned by search.)",
+    "role": "leader"
+  },
+  {
+    "id": "07",
+    "app": "Pinterest",
+    "screen": "Trends overview - Trends in the spotlight",
+    "pattern": "trending-list",
+    "platform": "web",
+    "mobbin_ref": "https://mobbin.com/screens/0a8f83f1-f267-4c6c-8a24-d9bb389588f8",
+    "selection_reason": "Non-obvious pick (consumer trends tool, not a dashboard). Ranked rows: rank, label, '+8,000% MoM - Popular in <category>' growth line, inline sparkline. Shows how to state 'rising vs usual' in text instead of pill badges.",
+    "role": "non-obvious"
+  },
+  {
+    "id": "08",
+    "app": "MagicPath",
+    "screen": "Canvas with parallel agents",
+    "pattern": "multiplayer-cursors",
+    "platform": "web",
+    "mobbin_ref": "https://mobbin.com/screens/6587376c-0460-458c-8096-75258e1ce905",
+    "selection_reason": "Non-obvious pick. Several autonomous agent cursors with small named tags working on separate frames, presence avatar stack in the top bar, agent status list in the side rail. Closest analogue to cursors drawing trend cards.",
+    "role": "non-obvious"
+  },
+  {
+    "id": "09",
+    "app": "Customer.io",
+    "screen": "Data Index - event detail drawer",
+    "pattern": "detail-drawer",
+    "platform": "web",
+    "mobbin_ref": "https://mobbin.com/screens/da276d52-c967-425f-8048-10cea234791f",
+    "selection_reason": "Mature analytics product. Right drawer with key-value details (last seen, today's count, sources), then Usage/Activity tabs and a footer 'View full page' action. Model for the trend card detail drawer. (Analyst used nearest same-app drawer c1d45657; listed id not returned by search.)",
+    "role": "leader"
+  }
+]

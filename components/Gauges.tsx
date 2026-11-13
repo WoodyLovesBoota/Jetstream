@@ -42,6 +42,8 @@ function formatRate(ema: number): string {
   return ema >= 100 ? String(Math.round(ema)) : ema.toFixed(1);
 }
 
+const LABEL_KO: Record<string, string> = { post: "글", like: "좋아요", repost: "리포스트", follow: "팔로우" };
+
 export default function Gauges() {
   const stripRef = useRef<HTMLElement | null>(null);
 
@@ -114,7 +116,7 @@ export default function Gauges() {
                 cell.delta,
                 dir === "flat"
                   ? "안정"
-                  : `${dir === "up" ? "+" : "\u2212"}${Math.abs(pct).toFixed(0)}%`,
+                  : `${dir === "up" ? "↑" : "↓"}${Math.abs(pct).toFixed(0)}%`,
               );
               if (cell.delta.dataset.dir !== dir) cell.delta.dataset.dir = dir;
             }
@@ -166,7 +168,7 @@ export default function Gauges() {
             <span className={styles.level} data-cell="fill" />
           </span>
           <div className={styles.content}>
-            <span className={styles.label}>{k}</span>
+            <span className={styles.label}>{LABEL_KO[k]}</span>
             <div className={styles.num}>
               <span className={styles.value} data-cell="value">
                 —

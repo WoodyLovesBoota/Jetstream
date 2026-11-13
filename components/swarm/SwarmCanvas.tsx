@@ -6,7 +6,8 @@ import { subscribeRenderPause, isRenderPaused } from "@/lib/jetstream/renderGate
 import { latestTrend, subscribeStream } from "@/lib/jetstream/useStreamWorker";
 import { Hydrator } from "@/src/trend/hydrate";
 import { SwarmController } from "./controller";
-import { eventColor } from "./cursors";
+import { cardColor } from "./cursors";
+import HudPill from "./HudPill";
 import { publishRoster } from "./rosterBus";
 import { renderSpreading } from "./spreading";
 
@@ -21,6 +22,8 @@ interface Preview {
   x: number;
   y: number;
 }
+
+const LIFE_KO: Record<string, string> = { rising: "떠오름", peak: "정점", fading: "식는 중" };
 
 function ago(ms: number): string {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
@@ -54,6 +57,15 @@ export default function SwarmCanvas() {
           setPreview(null);
         },
         onOpenCursor: (row, color, x, y) => setPreview({ row, color, x, y }),
+        // 데이터 레일 Tape의 맨 위(새 글이 들어오는 자리)에서 집어 온다 — 보드 좌표로
+        origin: () => {
+          const src = document.querySelector<HTMLElement>("[data-swarm-origin]");
+          if (src === null || src.offsetParent === null) return null;
+          const s = src.getBoundingClientRect();
+          const v = viewport.getBoundingClientRect();
+          const y = Math.min(Math.max(s.top - v.top + 40 + Math.random() * 90, 20), v.height - 20);
+          return { x: s.right - v.left - 6, y: y + viewport.scrollTop };
+        },
       },
       reduced,
     );
@@ -85,14 +97,14 @@ export default function SwarmCanvas() {
       if (s.trend !== null) {
         ctl.setTrend(s.trend);
         redrawSpreading();
-        const active = s.trend.events.filter((e) => e.state === "active").length;
+        const active = s.trend.events.filter((e) => e.state !== "past").length;
         board.dataset.events = String(active);
         const empty = emptyRef.current;
         if (empty !== null) {
           empty.hidden = s.trend.events.length > 0;
           empty.textContent = s.trend.learning.active
             ? `평소를 배우는 중입니다 — ${s.trend.learning.minutes}분 / 10분. 학습이 끝나면 평소보다 설명되지 않게 늘어나는 것이 여기 카드로 그려집니다.`
-            : "지금은 평소와 다르게 퍼지는 것이 없습니다. 상시어(trump 같은 말)는 혼자서는 여기에 오르지 않습니다.";
+            : "지금 많이 나오는 말을 모으는 중입니다. 몇 초 뒤 커서가 왼쪽 데이터에서 카드를 그립니다.";
         }
         hydrator?.want([...s.trend.spreading.map((p) => p.uri), ...s.trend.events.flatMap((e) => (e.postUri !== null ? [e.postUri] : []))]);
         // 열린 카드는 최신 값으로
@@ -131,10 +143,10 @@ export default function SwarmCanvas() {
     <section className="sw-canvas" aria-label="트렌드 캔버스">
       <div className="sw-tabs" role="tablist" aria-label="보기">
         <button type="button" role="tab" id="tab-events" aria-controls="panel-events" aria-selected={tab === "events"} onClick={() => setTab("events")}>
-          이벤트
+          트렌드 카드
         </button>
         <button type="button" role="tab" id="tab-spreading" aria-controls="panel-spreading" aria-selected={tab === "spreading"} onClick={() => setTab("spreading")}>
-          퍼지는 글
+          반응 몰리는 글
         </button>
       </div>
 
@@ -165,48 +177,76 @@ export default function SwarmCanvas() {
         )}
       </div>
 
+      <HudPill />
+
       <div id="panel-spreading" role="tabpanel" aria-labelledby="tab-spreading" className="sw-spreading" hidden={tab !== "spreading"}>
-        <p className="sp-note">5분 안에 좋아요·리포스트가 몰리는 글. 같은 점수(수렴 z′ × 퍼짐 × 가속 × 새로움)로 줄 세운다.</p>
+        <p className="sp-note">5분 안에 좋아요·리포스트가 몰리는 글 — 많이 몰리고 빨리 늘어나는 순</p>
         <ol ref={spreadRef} aria-label="퍼지는 글 목록" />
       </div>
 
+      {ev !== null && <div className="sw-scrim" onClick={() => setOpenId(null)} aria-hidden />}
       {ev !== null && (
-        <aside className="sw-drawer" aria-label={`이벤트 상세: ${ev.title}`} style={{ ["--ev" as string]: eventColor(ev.colorIdx) }}>
+        <aside className="sw-drawer" aria-label={`이벤트 상세: ${ev.title}`} style={{ ["--ev" as string]: cardColor(ev) }}>
           <header>
-            <span className="sw-drawer-kind">{ev.state === "past" ? "지나간 트렌드" : ev.lifecycle}</span>
+            <span className="sw-drawer-kind">
+              {ev.state === "past" ? "지나간 트렌드" : ev.state === "watch" ? "관찰 중 · 아직 트렌드 판정 전" : `트렌드 · ${LIFE_KO[ev.lifecycle] ?? ev.lifecycle}`}
+            </span>
             <h2>{ev.title}</h2>
             <button type="button" onClick={() => setOpenId(null)} aria-label="닫기">
-              ✕
+              ×
             </button>
           </header>
           <dl className="sw-drawer-stats">
             <div>
               <dt>평소 대비</dt>
-              <dd>×{ev.stats.mult >= 10 ? Math.round(ev.stats.mult) : ev.stats.mult.toFixed(1)}</dd>
+              <dd>
+                <span className="sw-num">×{ev.stats.mult >= 10 ? Math.round(ev.stats.mult) : ev.stats.mult.toFixed(1)}</span>
+              </dd>
             </div>
             <div>
               <dt>5분 작성자</dt>
-              <dd>{ev.stats.u}명</dd>
+              <dd>
+                <span className="sw-num">{ev.stats.u}</span>명
+              </dd>
             </div>
             <div>
               <dt>새로 합류</dt>
-              <dd>{Math.round(ev.stats.newRatio * 100)}%</dd>
+              <dd>
+                <span className="sw-num">{Math.round(ev.stats.newRatio * 100)}</span>%
+              </dd>
             </div>
             <div>
               <dt>점수</dt>
-              <dd>{ev.score.toFixed(1)}</dd>
+              <dd>
+                <span className="sw-num">{ev.score.toFixed(1)}</span>
+              </dd>
+            </div>
+            <div>
+              <dt>처음 잡힌 시각</dt>
+              <dd>
+                <span className="sw-num">{new Date(ev.enteredAt).toTimeString().slice(0, 8)}</span>
+              </dd>
             </div>
           </dl>
-          <svg className="sw-drawer-spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-label="최근 15분 언급 추이">
-            <polyline
-              points={ev.spark
-                .map((v, i) => `${((i / Math.max(1, ev.spark.length - 1)) * 100).toFixed(1)},${(28 - (v / Math.max(1, ...ev.spark)) * 26).toFixed(1)}`)
-                .join(" ")}
-            />
-          </svg>
-          {ev.representativePosts.length > 0 && (
-            <section>
-              <h3>대표 글</h3>
+          <section>
+            <h3>최근 15분</h3>
+            <svg className="sw-drawer-spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-label="최근 15분 언급 추이">
+              <polyline
+                points={ev.spark
+                  .map((v, i) => `${((i / Math.max(1, ev.spark.length - 1)) * 100).toFixed(1)},${(28 - (v / Math.max(1, ...ev.spark)) * 26).toFixed(1)}`)
+                  .join(" ")}
+              />
+            </svg>
+            <div className="sw-drawer-axis">
+              <span>
+                −<span className="sw-num">15</span>분
+              </span>
+              <span>지금</span>
+            </div>
+          </section>
+          <section>
+            <h3>대표 글</h3>
+            {ev.representativePosts.length > 0 ? (
               <ul className="sw-drawer-posts">
                 {ev.representativePosts.map((p) => (
                   <li key={`${p.did}/${p.rkey}`}>
@@ -217,11 +257,15 @@ export default function SwarmCanvas() {
                   </li>
                 ))}
               </ul>
-            </section>
-          )}
+            ) : (
+              <p className="sw-drawer-langs" style={{ padding: 0 }}>
+                —
+              </p>
+            )}
+          </section>
           {ev.related.length > 0 && (
             <section>
-              <h3>관련</h3>
+              <h3>관련 단어</h3>
               <ul className="sw-drawer-related">
                 {ev.related.map((r) => (
                   <li key={r}>{r}</li>
@@ -229,14 +273,18 @@ export default function SwarmCanvas() {
               </ul>
             </section>
           )}
-          {ev.link !== null && (
-            <section>
-              <h3>링크</h3>
+          <section>
+            <h3>링크</h3>
+            {ev.link !== null ? (
               <a className="sw-drawer-link" href={`https://${ev.link.url}`} target="_blank" rel="noopener noreferrer">
                 {ev.link.url}
               </a>
-            </section>
-          )}
+            ) : (
+              <span className="sw-drawer-langs" style={{ padding: 0 }}>
+                —
+              </span>
+            )}
+          </section>
           {ev.langs.length > 0 && <p className="sw-drawer-langs">언어 {ev.langs.join(" · ")}</p>}
         </aside>
       )}

@@ -86,8 +86,8 @@
 .fill {
   position: absolute;
   inset: 0;
-  /* Mix는 게시물(post)만 센다 — 그래서 post 펜의 잉크 */
-  background: var(--pen-post);
+  /* 언어 막대는 타입이 아니다 — 펜 색 대신 중립 잉크(타입 색과 헷갈리지 않게) */
+  background: var(--ink-3);
   /* 길이는 scaleX(점유율)로 — width를 바꾸면 10Hz마다 레이아웃이 돈다 */
   transform: scaleX(0);
   transform-origin: left center;
@@ -102,7 +102,7 @@
   inset: 0 auto 0 0;
   z-index: 1;
   width: 2px;
-  background: var(--pen-post);
+  background: var(--ink-3);
 }
 
 .row[data-lang="other"] .fill,

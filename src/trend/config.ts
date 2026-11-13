@@ -117,6 +117,18 @@ export interface TrendConfig {
   relatedMax: number;
   /** 퍼지는 글 탭 길이 */
   spreadingMax: number;
+
+  // ── 관찰 카드(트렌드 판정 전) ──
+  /** 트렌드가 아직 없어도 바로 그리는 '관찰 중' 카드 최대 수. 0이면 끈다 */
+  watchMax: number;
+  /** 관찰 카드 후보가 되려면 필요한 최근 W분 언급 수 */
+  watchMinX: number;
+  /** 한번 그린 관찰 카드를 최소한 유지하는 시간(ms) — 5초마다 카드가 갈리지 않게 */
+  watchHoldMs: number;
+  /** 관찰 카드 최소 고유 작성자 — 소수 계정 스팸(같은 링크 도배)을 거른다 */
+  watchMinAuthors: number;
+  /** 관찰 카드 최대 한 작성자 점유율 */
+  watchTopShareMax: number;
 }
 
 export const DEFAULT_CONFIG: TrendConfig = {
@@ -194,6 +206,12 @@ export const DEFAULT_CONFIG: TrendConfig = {
   overlapMinSet: 3,
   relatedMax: 6,
   spreadingMax: 20,
+
+  watchMax: 8,
+  watchMinX: 5,
+  watchHoldMs: 60_000,
+  watchMinAuthors: 3,
+  watchTopShareMax: 0.34,
 };
 
 export function makeConfig(over?: Partial<TrendConfig>): TrendConfig {

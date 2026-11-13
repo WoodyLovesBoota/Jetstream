@@ -1,0 +1,431 @@
+{
+  "color": {
+    "surface": {
+      "sheet": {
+        "$value": "#f2f4f1",
+        "$type": "color",
+        "source": "ds",
+        "$description": "app/globals.css#--paper — rail, top bar, cards, drawer"
+      },
+      "sunken": {
+        "$value": "#e7ebe6",
+        "$type": "color",
+        "source": "ds",
+        "$description": "app/globals.css#--paper-2 — canvas behind cards, tracks, pressed segment"
+      },
+      "scrim": {
+        "$value": "rgba(23,36,44,0.24)",
+        "$type": "color",
+        "source": "ref-09",
+        "$description": "grey scrim role from ref-09; base colour is app/globals.css#--ink, alpha 0.24 is an estimate"
+      }
+    },
+    "text": {
+      "primary": {
+        "$value": "#17242c",
+        "$type": "color",
+        "source": "ds",
+        "$description": "app/globals.css#--ink 14.3:1"
+      },
+      "secondary": {
+        "$value": "#4c5a62",
+        "$type": "color",
+        "source": "ds",
+        "$description": "app/globals.css#--ink-2 6.4:1"
+      },
+      "tertiary": {
+        "$value": "#5e6a71",
+        "$type": "color",
+        "source": "ds",
+        "$description": "app/globals.css#--ink-3 5.0:1 — captions, dimmed fractions"
+      },
+      "on-hue": {
+        "$value": "#f2f4f1",
+        "$type": "color",
+        "source": "ref-08",
+        "$description": "paper text on filled cursor tags"
+      }
+    },
+    "border": {
+      "rule": {
+        "$value": "#c9d1cb",
+        "$type": "color",
+        "source": "ds",
+        "$description": "app/globals.css#--rule — panel and card hairlines"
+      },
+      "grid": {
+        "$value": "#dde4de",
+        "$type": "color",
+        "source": "ds",
+        "$description": "app/globals.css#--grid — chart gridlines"
+      }
+    },
+    "status": {
+      "live": {
+        "$value": "#107752",
+        "$type": "color",
+        "source": "ds",
+        "$description": "app/globals.css#--ok — live dot + '수신 중' text"
+      },
+      "warning": {
+        "$value": "#935c0e",
+        "$type": "color",
+        "source": "ds",
+        "$description": "app/globals.css#--warn — reconnecting, degraded"
+      },
+      "danger": {
+        "$value": "#bd3917",
+        "$type": "color",
+        "source": "ds",
+        "$description": "app/globals.css#--danger — failed, gaps"
+      },
+      "accent": {
+        "$value": "#2152c4",
+        "$type": "color",
+        "source": "ds",
+        "$description": "app/globals.css#--accent — links, focus ring"
+      }
+    },
+    "type": {
+      "post": {
+        "$value": "#2152c4",
+        "$type": "color",
+        "source": "ds",
+        "$description": "lib/palette.ts#TYPE_COLORS.post / --pen-post"
+      },
+      "like": {
+        "$value": "#c8326b",
+        "$type": "color",
+        "source": "ds",
+        "$description": "lib/palette.ts#TYPE_COLORS.like"
+      },
+      "repost": {
+        "$value": "#107a54",
+        "$type": "color",
+        "source": "ds",
+        "$description": "lib/palette.ts#TYPE_COLORS.repost"
+      },
+      "follow": {
+        "$value": "#9a600f",
+        "$type": "color",
+        "source": "ds",
+        "$description": "lib/palette.ts#TYPE_COLORS.follow"
+      },
+      "other": {
+        "$value": "#7b868c",
+        "$type": "color",
+        "source": "ds",
+        "$description": "lib/palette.ts#TYPE_COLORS.other"
+      }
+    },
+    "event": {
+      "$description": "Identity hues for trend cards: subset of components/swarm/cursors.ts#COLORS keeping only hues ≥30° from every type pen and status hue (post/accent 222°, like 337°, repost/ok 157°, follow/warn 35°, danger 13°): #8B5CF6 (258°, nearest 36°) and #65A30D (85°, nearest 50°), darkened in HLS lightness until --paper text on the fill passes 4.5:1. Cards alternate the two; caption text and cursor tag words disambiguate (rule:not-color-alone). Role from ref-08.",
+      "1": {
+        "$value": "#692cf3",
+        "$type": "color",
+        "source": "ds",
+        "$description": "cursors.ts #8B5CF6 × L0.85 — 5.83:1"
+      },
+      "2": {
+        "$value": "#477209",
+        "$type": "color",
+        "source": "ds",
+        "$description": "cursors.ts #65A30D × L0.70 — 5.16:1"
+      },
+      "neutral": {
+        "$value": "#5e6a71",
+        "$type": "color",
+        "source": "ds",
+        "$description": "app/globals.css#--ink-3 — watch cards and unassigned cursors"
+      }
+    }
+  },
+  "font": {
+    "family": {
+      "sans": {
+        "$value": "Archivo, 'IBM Plex Sans KR', system-ui, sans-serif",
+        "$type": "fontFamily",
+        "source": "ds",
+        "$description": "app/layout.tsx#Archivo --font-sans; rationale in layout.tsx (wdth axis for hierarchy)"
+      },
+      "mono": {
+        "$value": "'IBM Plex Mono', ui-monospace, monospace",
+        "$type": "fontFamily",
+        "source": "ds",
+        "$description": "app/layout.tsx#IBM_Plex_Mono --font-mono — timestamps, DIDs, counts in lists"
+      },
+      "kr": {
+        "$value": "'IBM Plex Sans KR', sans-serif",
+        "$type": "fontFamily",
+        "source": "ds",
+        "$description": "app/layout.tsx#IBM_Plex_Sans_KR fallback"
+      }
+    },
+    "size": {
+      "caption": {
+        "$value": "11px",
+        "$type": "dimension",
+        "source": "ref-08",
+        "$description": "card captions, cursor tags"
+      },
+      "small": {
+        "$value": "12px",
+        "$type": "dimension",
+        "source": "ref-09",
+        "$description": "labels, status footer"
+      },
+      "body": {
+        "$value": "13px",
+        "$type": "dimension",
+        "source": "ref-04",
+        "$description": "rail rows, tabs, body"
+      },
+      "section": {
+        "$value": "15px",
+        "$type": "dimension",
+        "source": "ref-06, ref-09",
+        "$description": "rail section titles, drawer section headings"
+      },
+      "card-s": {
+        "$value": "16px",
+        "$type": "dimension",
+        "source": "ref-05"
+      },
+      "drawer-title": {
+        "$value": "17px",
+        "$type": "dimension",
+        "source": "ref-09"
+      },
+      "card-m": {
+        "$value": "18px",
+        "$type": "dimension",
+        "source": "ref-04"
+      },
+      "rate-primary": {
+        "$value": "24px",
+        "$type": "dimension",
+        "source": "ref-03",
+        "$description": "value:label ≈1.8 with 13px label"
+      },
+      "card-l": {
+        "$value": "24px",
+        "$type": "dimension",
+        "source": "ref-07"
+      }
+    },
+    "weight": {
+      "regular": {
+        "$value": 400,
+        "$type": "fontWeight",
+        "source": "ds"
+      },
+      "medium": {
+        "$value": 500,
+        "$type": "fontWeight",
+        "source": "ref-08"
+      },
+      "semibold": {
+        "$value": 600,
+        "$type": "fontWeight",
+        "source": "ds",
+        "$description": "app/layout.tsx IBM_Plex_Sans_KR weight 600"
+      }
+    }
+  },
+  "space": {
+    "1": {
+      "$value": "4px",
+      "$type": "dimension",
+      "source": "rule:density-padding",
+      "$description": "4px base step; dense rows"
+    },
+    "2": {
+      "$value": "8px",
+      "$type": "dimension",
+      "source": "rule:density-padding"
+    },
+    "3": {
+      "$value": "12px",
+      "$type": "dimension",
+      "source": "rule:density-padding"
+    },
+    "4": {
+      "$value": "16px",
+      "$type": "dimension",
+      "source": "rule:density-padding",
+      "$description": "rail inset"
+    },
+    "5": {
+      "$value": "20px",
+      "$type": "dimension",
+      "source": "ds",
+      "$description": "app/globals.css#--pad — card inset"
+    }
+  },
+  "size": {
+    "topbar": {
+      "$value": "44px",
+      "$type": "dimension",
+      "source": "ref-04"
+    },
+    "rail": {
+      "$value": "296px",
+      "$type": "dimension",
+      "source": "ref-01",
+      "$description": "≈20% of a 1440 viewport"
+    },
+    "diagnostics": {
+      "$value": "380px",
+      "$type": "dimension",
+      "source": "ds",
+      "$description": "app/swarm.css#--inspector"
+    },
+    "drawer": {
+      "$value": "480px",
+      "$type": "dimension",
+      "source": "ref-09"
+    },
+    "status-footer": {
+      "$value": "28px",
+      "$type": "dimension",
+      "source": "ref-03, ref-06",
+      "$description": "row pitch 28–29px"
+    },
+    "avatar": {
+      "$value": "26px",
+      "$type": "dimension",
+      "source": "ref-08",
+      "$description": "ref-08 ≈27px"
+    },
+    "cursor": {
+      "$value": "14px",
+      "$type": "dimension",
+      "source": "ref-08"
+    },
+    "tag-offset": {
+      "$value": "8px",
+      "$type": "dimension",
+      "source": "ref-08",
+      "$description": "tag offset below-right of cursor tip, 6–10px"
+    }
+  },
+  "density": {
+    "row-stream": {
+      "$value": "56px",
+      "$type": "dimension",
+      "source": "ds",
+      "$description": "components/Tape.tsx#ROW_HEIGHT — time line + 2 text lines"
+    },
+    "row-share": {
+      "$value": "28px",
+      "$type": "dimension",
+      "source": "ref-03"
+    },
+    "row-kv": {
+      "$value": "32px",
+      "$type": "dimension",
+      "source": "ref-09",
+      "$description": "ref-09 ≈38px tightened for density"
+    },
+    "row-spreading": {
+      "$value": "56px",
+      "$type": "dimension",
+      "source": "ds",
+      "$description": "matches stream row"
+    }
+  },
+  "radius": {
+    "frame": {
+      "$value": "0px",
+      "$type": "dimension",
+      "source": "ref-08",
+      "$description": "card frames"
+    },
+    "tag": {
+      "$value": "3px",
+      "$type": "dimension",
+      "source": "ref-08",
+      "$description": "cursor tags, chips"
+    },
+    "control": {
+      "$value": "6px",
+      "$type": "dimension",
+      "source": "ds",
+      "$description": "app/globals.css#--radius-sm buttons, segments"
+    },
+    "round": {
+      "$value": "999px",
+      "$type": "dimension",
+      "source": "ref-08",
+      "$description": "avatars, dots"
+    }
+  },
+  "stroke": {
+    "hairline": {
+      "$value": "1px",
+      "$type": "dimension",
+      "source": "ref-02, ref-03"
+    },
+    "trend-outline": {
+      "$value": "2px",
+      "$type": "dimension",
+      "source": "ref-08"
+    },
+    "sparkline": {
+      "$value": "1.5px",
+      "$type": "dimension",
+      "source": "ref-03, ref-07"
+    },
+    "share-bar": {
+      "$value": "10px",
+      "$type": "dimension",
+      "source": "ds",
+      "$description": "components/Mix.module.css bar height 10px"
+    }
+  },
+  "number": {
+    "rate-decimals": {
+      "$value": 1,
+      "$type": "number",
+      "source": "ref-01",
+      "$description": "posts/s with 1 decimal (ref-01 durations 1–2 decimals)"
+    },
+    "multiplier-decimals": {
+      "$value": 1,
+      "$type": "number",
+      "source": "ds",
+      "$description": "components/swarm/SwarmCanvas.tsx drawer: ×N.N below 10, integer at ≥10"
+    },
+    "percent-decimals": {
+      "$value": 1,
+      "$type": "number",
+      "source": "ds",
+      "$description": "components/Mix.tsx language shares 76.4%"
+    },
+    "timestamp-ms": {
+      "$value": 3,
+      "$type": "number",
+      "source": "ref-01, ref-02, ref-04",
+      "$description": "HH:MM:SS.mmm, fraction dimmed (ref-06)"
+    },
+    "delta-decimals": {
+      "$value": 0,
+      "$type": "number",
+      "source": "ds",
+      "$description": "components/Gauges.tsx:117 integer delta with sign; within ±3% shows '안정' (Gauges.tsx:18)"
+    }
+  },
+  "motion": {
+    "ui": {
+      "$value": [
+        0.23,
+        1,
+        0.32,
+        1
+      ],
+      "$type": "cubicBezier",
+      "source": "ds",
+      "$description": "app/globals.css#--ease-out"
+    }
+  }
+}

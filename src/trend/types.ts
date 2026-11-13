@@ -5,7 +5,8 @@ import type { Lifecycle } from "./signals.ts";
 
 export type { CandidateKind, Lifecycle };
 
-export type EventState = "active" | "past";
+/** active: 트렌드 판정 통과 · watch: 판정 전, 지금 많이 나오는 후보(바로 그리는 관찰 카드) · past: 지나간 트렌드 */
+export type EventState = "active" | "watch" | "past";
 
 export interface TrendMember {
   key: string;

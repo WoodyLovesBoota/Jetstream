@@ -112,7 +112,7 @@ export default function Tape() {
   }
 
   return (
-    <div className={styles.root}>
+    <div className={styles.root} data-swarm-origin>
       <div className={styles.statusBar}>
         <p className={styles.status}>
           <span ref={strideRef}>전부 표시</span>
@@ -150,7 +150,10 @@ export default function Tape() {
                   style={{ transform: `translateY(${vi.start}px)` }}
                 >
                   <div className={styles.meta}>
-                    <span className={styles.time}>{formatTimeUs(row.timeUs)}</span>
+                    <span className={styles.time}>
+                      {formatTimeUs(row.timeUs).slice(0, 8)}
+                      <span className={styles.frac}>{formatTimeUs(row.timeUs).slice(8)}</span>
+                    </span>
                     <span className={styles.did} translate="no">
                       {row.did}
                     </span>

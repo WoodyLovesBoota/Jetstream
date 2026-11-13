@@ -10,9 +10,20 @@ import { subscribeRoster } from "./rosterBus";
 // 아바타 스택은 2Hz로 DOM만 고친다(React 리렌더 없음).
 
 function connLabel(state: string, attempt: number): string {
-  if (state === "reconnecting") return `reconnecting ${attempt}`;
-  if (state === "failed") return `failed ${attempt}`;
-  return state;
+  switch (state) {
+    case "live":
+      return "수신 중";
+    case "replaying":
+      return "되감는 중";
+    case "connecting":
+      return "연결 중";
+    case "reconnecting":
+      return `재연결 중 ${attempt}`;
+    case "failed":
+      return `연결 실패 ${attempt}`;
+    default:
+      return "연결 끊김";
+  }
 }
 
 export default function Toolbar({ panelOpen, onTogglePanel }: { panelOpen: boolean; onTogglePanel: () => void }) {
@@ -30,7 +41,7 @@ export default function Toolbar({ panelOpen, onTogglePanel }: { panelOpen: boole
         const s = document.createElement("span");
         s.className = "tb-avatar";
         s.style.background = r.color;
-        s.style.color = tagInk(r.color);
+        s.style.color = tagInk();
         s.textContent = (r.tag.replace(/^[#@]/, "")[0] ?? "?").toUpperCase();
         s.title = r.tag;
         return s;
@@ -49,11 +60,6 @@ export default function Toolbar({ panelOpen, onTogglePanel }: { panelOpen: boole
   return (
     <header className="tb">
       <div className="tb-left">
-        <span className="tb-logo" aria-hidden>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-            <path d="M3 12c3-6 6-6 9 0s6 6 9 0" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-          </svg>
-        </span>
         <h1 className="tb-title">
           <span className="tb-dim">Jetstream /</span> Trends
         </h1>
@@ -62,19 +68,25 @@ export default function Toolbar({ panelOpen, onTogglePanel }: { panelOpen: boole
         <span className="tb-badge" data-state={conn.state} data-instance={conn.instance} role="status" title={`instance: ${conn.instance}`}>
           <i aria-hidden />
           {connLabel(conn.state, conn.attempt)}
+          <span className="tb-instance">{conn.instance}</span>
         </span>
-        <button
-          type="button"
-          className="tb-btn tb-hide-narrow"
-          data-filter={conn.filter}
-          aria-pressed={full}
-          onClick={() => setFilterMode(full ? "filtered" : "full")}
-          title={full ? "필터 없음 — 모든 컬렉션" : "app.bsky.feed.* + app.bsky.graph.follow"}
-        >
-          {full ? "전체 컬렉션" : "주요 컬렉션"}
-        </button>
+        {/* 수신 범위 — 지금 고른 쪽이 켜진 2칸 전환(버튼 글자가 상태인지 동작인지 헷갈리지 않게) */}
+        <div className="tb-seg tb-hide-narrow" role="radiogroup" aria-label="수신 범위" data-filter={conn.filter}>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={!full}
+            onClick={() => setFilterMode("filtered")}
+            title="글·좋아요·리포스트·팔로우만(app.bsky.feed.* + app.bsky.graph.follow)"
+          >
+            주요
+          </button>
+          <button type="button" role="radio" aria-checked={full} onClick={() => setFilterMode("full")} title="필터 없음 — 모든 컬렉션">
+            전체
+          </button>
+        </div>
         <button type="button" className="tb-btn" data-paused={paused} aria-pressed={paused} onClick={toggleRenderPause} title="렌더만 정지 — 워커는 계속 집계한다">
-          {paused ? "재개" : "Pause"}
+          {paused ? "재개" : "일시정지"}
         </button>
         <div className="tb-stack" ref={stackRef} aria-label="지금 화면의 커서" />
         <button type="button" className="tb-btn tb-hide-narrow" aria-pressed={panelOpen} aria-controls="inspector" onClick={onTogglePanel} title="진단 패널(Pulse·Mix·Tape·HUD)">

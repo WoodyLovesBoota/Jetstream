@@ -7,14 +7,16 @@ description: Jetstream Deck 변경을 실제 브라우저에서 구동해 검증
 
 ## 서버
 
-- 보통 dev 서버가 이미 `http://localhost:3000`에 떠 있다 (사용자가 띄워둠).
+- 보통 dev 서버가 이미 `http://localhost:3000`에 떠 있다 (사용자가 띄워둠). **단 3000이 다른 프로젝트일 수 있다** —
+  `/`가 `/en`으로 307 되면 남의 서버다. 그때는 `pnpm exec next dev -p 3010`.
   `curl -s -o /dev/null -w "%{http_code}" http://localhost:3000`으로 확인 후 그대로 쓸 것 — 죽이지 말 것.
 - 없으면 `pnpm dev` (백그라운드). 3000이 점유돼 있으면 next가 3001을 시도하다가
   같은 프로젝트의 기존 서버를 감지하고 exit 1 — 이때는 기존 서버를 쓰면 된다.
 
 ## 브라우저 드라이브
 
-- Playwright 브라우저 캐시가 있다: `~/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`
+- Playwright chromium 캐시는 지워졌다(2026-11 기준 webkit만 있음). 시스템 Chrome을 쓴다:
+  `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
 - 프로젝트에 playwright 의존성은 없다. 스크래치패드에 `npm i playwright-core` 후
   `chromium.launch({ executablePath: <위 경로> })`로 붙는다.
 
@@ -29,7 +31,7 @@ description: Jetstream Deck 변경을 실제 브라우저에서 구동해 검증
 - HUD(P2, R1에서 플로팅 → 우측 컬럼 하단 고정): `aside[aria-label="diagnostics"]`의
   `dd` 노드들 — 순서대로
   recv/s, proc/s, drop/s, **cols 10s**, tracked(트렌드 추적 후보/상한), evict, bots(뮤트 DID), snap(ms), frame p95(ms), ws(=`dd`[9]).
-  HUD는 이제 진단 패널(`#inspector`, 기본 접힘) 안에 있다.
+  HUD는 진단 패널(`#inspector`, 기본 접힘) 안에 있다. Pulse·Tape·Mix는 왼쪽 데이터 레일(`.rail`, 항상 보임)에 있다.
   (P8에서 `cols 10s`가 인덱스 3에 끼어들어 그 뒤가 한 칸씩 밀렸다.)
   rAF 루프가 textContent를 직접 갱신하므로 값 변화 관찰은 두 시점 텍스트 비교로 한다.
   ws 값 노드에는 `data-state`도 붙고, 뒤에 붙는 초는 상태에 따라 다른 것을 가리킨다 —
@@ -39,18 +41,22 @@ description: Jetstream Deck 변경을 실제 브라우저에서 구동해 검증
 - 트렌드 엔진(src/trend/, 구 Surge 대체): `globalThis.__jetstream.trend`는 5초 점수 패스가 돈
   틱에만 실리고 나머지는 `null` — 최신 것은 `useStreamWorker.latestTrend()`가 들고 있다.
   `{events[≤15], spreading[≤20], learning: {active, minutes, hasPrior}, stats}`. 이벤트는
-  `{id, colorIdx, state(active|past), title, titleKind, members[], related[], score, lifecycle(rising|peak|fading),
+  `{id, colorIdx, state(active|watch|past), title, titleKind, members[], related[], score, lifecycle(rising|peak|fading),
   spark[30], representativePosts[], link, stats{mult,u,newRatio,a,isNew}, langs[]}`.
   `.trendStats`(1Hz) = `{tracked, trackedCap(30k), hot, engage, trackedEvicted, muted, approxBytes, scoreMs, …}`,
   `.trendStatus` = `{state(loading|ready), prior(loaded|missing|error), memoryRecords, fixture}`, `.pings`(참여 핑).
   - **prior**: 정상이면 `trendStatus.prior === "loaded"`, `trend.learning.active === false`. prior가 없으면
-    첫 10분은 `learning.active`이고 진입이 막힌다(HUD pill에 "학습 중 n분").
+    첫 10분은 `learning.active`이고 진입이 막힌다(하단 상태줄에 "평소 배우는 중 n분").
   - **불변식**: 활성 이벤트 제목 멤버가 배경어 단어(`w:` ∈ D)인 경우 0. p:(좋아요 몰린 글)만으로 된
     이벤트는 없다(퍼지는 글 탭 전용).
   - 프로덕션에서도 `globalThis.__swarm.stats()`(커서 수·이벤트별 커서·카드)와 `.status()`가 있다.
 - 스웜 UI(components/swarm/): `.sw-card[data-event-id][data-state][data-life][data-built][data-size]`,
-  `.sw-cursor`(≤150), 탭 `[role="tab"]` 2개(이벤트/퍼지는 글), 상세 서랍 `.sw-drawer`, HUD pill `.hud-pill`,
-  진단 패널 `#inspector`(툴바 "진단" 버튼, ≤900px에선 숨김).
+  `.sw-cursor`(≤150), 탭 `[role="tab"]` 2개(트렌드 카드/반응 몰리는 글), 상세 서랍 `.sw-drawer`(+ `.sw-scrim`), 캔버스 하단 상태줄 `.hud-pill.sw-status`(`data-state`, `data-paused`),
+  진단 패널 `#inspector`(툴바 "진단" 버튼, ≤900px에선 숨김), 데이터 레일 `.rail`(≤900px에선 숨김).
+  - **관찰 카드** `state === "watch"`: 트렌드 판정 전이라도 지금 많이 나오는 후보(작성자 ≥3, 평소보다 많음)를
+    바로 그린다(라이브 실측 첫 카드 ~25초, 최대 8장, 점선 테두리). 진입하면 같은 ID로 active가 된다.
+    커서는 레일 Tape 맨 위(`[data-swarm-origin]`)에서 출발한다. 상태줄은 `트렌드 n · 관찰 m`. 디자인은 라이트 기록지 한 장(design/jetstream-trends-live) — 트렌드만 식별색 2개(#692cf3/#477209), 관찰·무소속은 --ink-3. 툴바 연결 상태·버튼 문구는 한국어("수신 중", "일시정지").
+  - 수신 범위 토글은 `.tb-seg [role="radio"]`(주요/전체, `aria-checked`가 현재 상태).
   - **픽스처 모드** `?fixture=news`: 네트워크 없이 카드 3개가 접속 직후 그려지고(built false→true),
     ~30초 뒤 `#worldcupfinal`, ~1분 뒤 `東京 地震`, `#aurora`는 식다가 2~3분 안에 past로 흐려진다.
     e2e(`pnpm test:e2e`)가 이 흐름을 검증한다.
@@ -98,7 +104,7 @@ description: Jetstream Deck 변경을 실제 브라우저에서 구동해 검증
     정지 중 `data-buffered`가 증가하고 `__jetstream.ts`도 계속 갱신되는데(워커는 안 멈춘다)
     Mix의 `data-total`과 Tape 행 수는 **동결**돼야 한다. 재개 후 3 rAF 안에 Mix `data-total`이
     최신 스냅샷과 일치하면 "즉시 점프" 확인(실측 ~19ms).
-  - **필터 토글:** 헤더 `button[data-filter]` 또는 `__jetstreamDebug.filter("full")`.
+  - **필터 토글:** 툴바 `.tb-seg[data-filter]`의 라디오 버튼 또는 `__jetstreamDebug.filter("full")`.
     `__jetstream.conn.filter`가 `filtered`↔`full`로 바뀐다. **`recv/s`로 검증하지 말 것** —
     기본 필터가 이미 파이어호스의 ~89%라 +12%뿐이고 요동에 묻힌다(ARCHITECTURE §9).
     관측점은 HUD의 `cols 10s`(6 → 25~29). 의도된 재연결이라 `gaps`는 비어 있어야 하고,

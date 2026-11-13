@@ -31,11 +31,14 @@ import {
   typeDelay,
   type Pt,
 } from "@/lib/swarm/motion";
-import { eventColor, ICONS, IDLE_COLOR, tagInk, type Shape } from "./cursors";
+import { cardColor, ICONS, IDLE_COLOR, tagInk, type Shape } from "./cursors";
 
 export const MAX_CURSORS = 150;
 const RING_POOL = 16;
 const LIFE_KO: Record<string, string> = { rising: "떠오름", peak: "정점", fading: "식는 중" };
+/** 진입 이벤트(active)와 관찰 카드(watch)는 커서가 모이는 살아있는 카드다 */
+const isLive = (ev: TrendEvent): boolean => ev.state !== "past";
+const stateKo = (ev: TrendEvent): string => (ev.state === "past" ? "지나간 트렌드" : ev.state === "watch" ? "관찰 중" : LIFE_KO[ev.lifecycle]);
 const KIND_KO: Record<string, string> = {
   h: "해시태그",
   b: "구",
@@ -118,6 +121,8 @@ export interface SwarmCallbacks {
   onRoster?: (list: { tag: string; color: string }[], total: number) => void;
   onOpenCard?: (ev: TrendEvent) => void;
   onOpenCursor?: (row: TapeRow, color: string, x: number, y: number) => void;
+  /** 커서가 데이터를 집어 오는 자리(보드 좌표) — 데이터 레일의 새 글. 없으면 화면 좌우 가장자리 */
+  origin?: () => Pt | null;
 }
 
 const rand = (a: number, b: number): number => a + Math.random() * (b - a);
@@ -269,7 +274,7 @@ export class SwarmController {
     c.el.style.color = color;
     c.tag.textContent = tag;
     c.tag.style.background = color;
-    c.tag.style.color = tagInk(color);
+    c.tag.style.color = tagInk();
     this.setShape(c, shape);
   }
 
@@ -284,6 +289,8 @@ export class SwarmController {
 
   /** 보이는 영역 좌·우 가장자리 바깥의 출발점 */
   private edgePoint(): Pt {
+    const o = this.cbs.origin?.();
+    if (o != null) return o;
     const top = this.viewport.scrollTop;
     const left = Math.random() < 0.5;
     return { x: left ? -40 : this.width + 40, y: top + rand(0.1, 0.9) * this.viewH };
@@ -332,7 +339,7 @@ export class SwarmController {
     if (this.reduced || this.paused || this.destroyed || document.hidden) return;
     for (const row of rows) {
       const card = row.eventId !== null ? this.cards.get(row.eventId) : undefined;
-      const usable = card !== undefined && card.built && card.ev.state === "active" && card.rect !== null;
+      const usable = card !== undefined && card.built && isLive(card.ev) && card.rect !== null;
       // 식는 이벤트는 도착이 절반으로 준다
       if (usable && card.ev.lifecycle === "fading" && Math.random() < 0.5) continue;
       const c = this.spawnAt(this.edgePoint());
@@ -341,7 +348,7 @@ export class SwarmController {
       if (usable) {
         const ev = card.ev;
         c.el.dataset.idle = "false";
-        this.setLook(c, eventColor(ev.colorIdx), row.tag, "arrow");
+        this.setLook(c, cardColor(ev), row.tag, "arrow");
         c.eventId = ev.id;
         this.setOrbit(c, card);
         // 공전 시간 ∝ 고유 작성자 U, 도착 속도 ∝ 가속 a
@@ -397,7 +404,7 @@ export class SwarmController {
       const x = at?.x ?? card.rect.x + rand(0.2, 0.8) * card.rect.w;
       const y = at?.y ?? card.rect.y + rand(0.3, 0.8) * card.rect.h;
       const ring = this.rings[this.ringIdx++ % this.rings.length];
-      ring.style.color = eventColor(card.ev.colorIdx);
+      ring.style.color = cardColor(card.ev);
       ring.animate(
         [
           { transform: `translate3d(${x - 14}px, ${y - 14}px, 0) scale(0.3)`, opacity: 0.95 },
@@ -420,7 +427,7 @@ export class SwarmController {
         card = this.makeCard(ev);
         this.cards.set(ev.id, card);
       }
-      const wasActive = card.ev.state === "active";
+      const wasActive = isLive(card.ev);
       card.ev = ev;
       card.removing = 0;
       this.fillCard(card);
@@ -517,26 +524,33 @@ export class SwarmController {
 
   private fillCard(card: Card): void {
     const ev = card.ev;
-    const color = eventColor(ev.colorIdx);
+    const color = cardColor(ev);
     card.el.style.setProperty("--ev", color);
     card.el.dataset.state = ev.state;
     card.el.dataset.life = ev.lifecycle;
-    card.el.setAttribute("aria-label", `${ev.title} — ${ev.state === "past" ? "지나간 트렌드" : LIFE_KO[ev.lifecycle]}`);
-    card.label.textContent = `${KIND_KO[ev.titleKind] ?? ""} · ${ev.state === "past" ? "지나간 트렌드" : LIFE_KO[ev.lifecycle]}${ev.langs.length > 0 ? ` · ${ev.langs.join("/")}` : ""}`;
+    card.el.setAttribute("aria-label", `${ev.title} — ${stateKo(ev)}`);
+    card.el.dataset.state = ev.state;
+    card.label.textContent = `${KIND_KO[ev.titleKind] ?? ""} · ${stateKo(ev)}${ev.langs.length > 0 ? ` · ${ev.langs.join("/")}` : ""}`;
     card.titleText = ev.title;
     if (card.built && !card.typing) card.title.textContent = ev.title;
+    // 배지 대신 한 줄 문장 — 숫자만 고정폭(Plex Mono엔 한글이 없다)
     const mult = ev.stats.mult >= 10 ? Math.round(ev.stats.mult).toString() : ev.stats.mult.toFixed(1);
+    const num = (t: string): HTMLSpanElement => {
+      const s = document.createElement("span");
+      s.className = "sw-num";
+      s.textContent = t;
+      return s;
+    };
+    // 증감 문구는 트렌드만 — 관찰 카드는 직전 구간이 비어 가속 값이 뜻이 없다(접속 직후)
+    const trend = ev.state !== "active" ? null : ev.lifecycle === "rising" ? " · ↑ 늘어나는 중" : ev.lifecycle === "fading" ? " · ↓ 식는 중" : null;
     card.meta.replaceChildren(
-      ...[
-        [`×${mult}`, "평소 대비"],
-        [`${ev.stats.u}명`, "5분 고유 작성자"],
-        ...(ev.stats.isNew ? [["NEW", "처음 보는 후보"]] : []),
-      ].map(([t, title]) => {
-        const s = document.createElement("span");
-        s.textContent = t;
-        s.title = title;
-        return s;
-      }),
+      ev.state === "past" ? "최고 평소의 " : "평소의 ",
+      num(mult),
+      "배 · 작성자 ",
+      num(String(ev.stats.u)),
+      "명",
+      ...(ev.stats.isNew && ev.state !== "past" ? [" · 처음 보는 말"] : []),
+      ...(trend !== null ? [trend] : []),
     );
     const max = Math.max(1, ...ev.spark);
     card.spark.setAttribute(
@@ -590,7 +604,7 @@ export class SwarmController {
     card.el.dataset.built = "false";
     card.frame.style.clipPath = "inset(0 100% 100% 0)";
     card.title.textContent = "";
-    const color = eventColor(card.ev.colorIdx);
+    const color = cardColor(card.ev);
     const drawer = this.spawnAt(this.edgePoint());
     if (drawer === null) {
       this.finishBuild(card);
@@ -623,9 +637,9 @@ export class SwarmController {
     card.typed = 0;
     card.title.textContent = "";
     card.title.dataset.caret = "on";
-    card.title.style.setProperty("--caret", eventColor(card.ev.colorIdx));
+    card.title.style.setProperty("--caret", cardColor(card.ev));
     typer.el.dataset.idle = "false";
-    this.setLook(typer, eventColor(card.ev.colorIdx), card.ev.title.slice(0, 24), "text");
+    this.setLook(typer, cardColor(card.ev), card.ev.title.slice(0, 24), "text");
     typer.eventId = card.id;
     typer.job = { kind: "type", card, next: 0, i: 0 };
     const r = card.rect as CardRect;
@@ -686,7 +700,7 @@ export class SwarmController {
     }
     for (const card of this.cards.values()) {
       const ev = card.ev;
-      if (!card.built || ev.state !== "active" || ev.lifecycle === "fading" || card.rect === null) continue;
+      if (!card.built || !isLive(ev) || ev.lifecycle === "fading" || card.rect === null) continue;
       const target = clamp(Math.round(ev.stats.u / 5), 3, 22);
       const have = count.get(ev.id) ?? 0;
       // 0.5초마다 부족분의 일부만 — 한꺼번에 몰려오지 않고 흘러들게
@@ -701,7 +715,7 @@ export class SwarmController {
             ? null
             : { timeUs: post.timeMs * 1000, did: post.did.slice(0, 18), text: post.text, langs: post.langs, fullDid: post.did, rkey: post.rkey, tag: ev.title, eventId: ev.id };
         c.el.dataset.idle = "false";
-        this.setLook(c, eventColor(ev.colorIdx), labels[Math.floor(Math.random() * labels.length)].slice(0, 28), "arrow");
+        this.setLook(c, cardColor(ev), labels[Math.floor(Math.random() * labels.length)].slice(0, 28), "arrow");
         c.eventId = ev.id;
         this.setOrbit(c, card);
         c.life = rand(4, 8);
@@ -736,7 +750,7 @@ export class SwarmController {
       }
       case "orbit": {
         const card = c.eventId !== null ? this.cards.get(c.eventId) : undefined;
-        if (card === undefined || card.rect === null || card.ev.state !== "active") {
+        if (card === undefined || card.rect === null || !isLive(card.ev)) {
           this.leave(c);
           return;
         }

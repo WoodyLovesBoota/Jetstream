@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jetstream Trends — live</title>
+<style>
+:root {
+  /* 06-tokens.json */
+  --color-surface-sheet: #f2f4f1;
+  --color-surface-sunken: #e7ebe6;
+  --color-surface-scrim: rgba(23, 36, 44, 0.24);
+  --color-text-primary: #17242c;
+  --color-text-secondary: #4c5a62;
+  --color-text-tertiary: #5e6a71;
+  --color-text-on-hue: #f2f4f1;
+  --color-border-rule: #c9d1cb;
+  --color-border-grid: #dde4de;
+  --color-status-live: #107752;
+  --color-status-warning: #935c0e;
+  --color-status-danger: #bd3917;
+  --color-status-accent: #2152c4;
+  --color-type-post: #2152c4;
+  --color-type-like: #c8326b;
+  --color-type-repost: #107a54;
+  --color-type-follow: #9a600f;
+  --color-type-other: #7b868c;
+  --color-event-1: #692cf3;
+  --color-event-2: #477209;
+  --color-event-neutral: #5e6a71;
+  --font-family-sans: Archivo, "IBM Plex Sans KR", system-ui, sans-serif;
+  --font-family-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-size-caption: 11px;
+  --font-size-small: 12px;
+  --font-size-body: 13px;
+  --font-size-section: 15px;
+  --font-size-card-s: 16px;
+  --font-size-drawer-title: 17px;
+  --font-size-card-m: 18px;
+  --font-size-rate-primary: 24px;
+  --font-size-card-l: 24px;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --size-topbar: 44px;
+  --size-rail: 296px;
+  --size-diagnostics: 380px;
+  --size-drawer: 480px;
+  --size-status-footer: 28px;
+  --size-avatar: 26px;
+  --size-cursor: 14px;
+  --size-tag-offset: 8px;
+  --density-row-stream: 56px;
+  --density-row-share: 28px;
+  --density-row-kv: 32px;
+  --density-row-spreading: 56px;
+  --radius-frame: 0px;
+  --radius-tag: 3px;
+  --radius-control: 6px;
+  --radius-round: 999px;
+  --stroke-hairline: 1px;
+  --stroke-trend-outline: 2px;
+  --stroke-sparkline: 1.5px;
+  --stroke-share-bar: 10px;
+  --motion-ui: cubic-bezier(0.23, 1, 0.32, 1);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--color-surface-sheet);
+  color: var(--color-text-primary);
+  font: var(--font-weight-regular) var(--font-size-body)/1.45 var(--font-family-sans);
+}
+.mono { font-family: var(--font-family-mono); font-variant-numeric: tabular-nums; }
+.dim { color: var(--color-text-secondary); }
+.faint { color: var(--color-text-tertiary); }
+button { font: inherit; color: inherit; }
+
+.app { display: grid; grid-template-rows: var(--size-topbar) 1fr; height: 100vh; }
+
+/* R1 */
+.top { display: flex; align-items: center; gap: var(--space-3); padding: 0 var(--space-4); border-bottom: var(--stroke-hairline) solid var(--color-border-rule); }
+.wordmark { font-weight: var(--font-weight-semibold); font-size: var(--font-size-body); letter-spacing: 0.01em; }
+.wordmark span { color: var(--color-text-tertiary); font-weight: var(--font-weight-regular); }
+.top .grow { flex: 1; }
+.conn { display: flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-small); }
+.dot { width: 6px; height: 6px; border-radius: var(--radius-round); background: var(--color-status-live); }
+.btn { height: 28px; padding: 0 var(--space-3); border: var(--stroke-hairline) solid var(--color-border-rule); border-radius: var(--radius-control); background: transparent; cursor: pointer; }
+.btn:hover { background: var(--color-surface-sunken); }
+.seg { display: flex; padding: 2px; border: var(--stroke-hairline) solid var(--color-border-rule); border-radius: var(--radius-control); }
+.seg button { border: 0; background: transparent; padding: 2px var(--space-3); border-radius: var(--radius-tag); color: var(--color-text-secondary); cursor: pointer; }
+.seg button[aria-checked="true"] { background: var(--color-surface-sunken); color: var(--color-text-primary); font-weight: var(--font-weight-medium); }
+.avatars { display: flex; padding-left: 6px; }
+.avatars i { width: var(--size-avatar); height: var(--size-avatar); margin-left: -6px; border-radius: var(--radius-round); border: var(--stroke-hairline) solid var(--color-surface-sheet); display: grid; place-items: center; font: var(--font-weight-medium) var(--font-size-caption)/1 var(--font-family-sans); font-style: normal; color: var(--color-text-on-hue); background: var(--color-event-neutral); }
+.avatars .e1 { background: var(--color-event-1); } .avatars .e2 { background: var(--color-event-2); }
+.avatars .more { background: var(--color-surface-sunken); color: var(--color-text-secondary); width: auto; padding: 0 var(--space-2); }
+
+.body { display: grid; grid-template-columns: var(--size-rail) 1fr; min-height: 0; }
+.body.diag-open { grid-template-columns: var(--size-rail) 1fr var(--size-diagnostics); }
+.diag { border-left: var(--stroke-hairline) solid var(--color-border-rule); padding: var(--space-4); overflow-y: auto; }
+.diag h2 { margin: 0 0 var(--space-3); font-size: var(--font-size-section); font-weight: var(--font-weight-semibold); }
+.diag .r { display: flex; justify-content: space-between; height: var(--density-row-share); align-items: center; border-bottom: var(--stroke-hairline) solid var(--color-border-grid); }
+.diag .r span:last-child { font-family: var(--font-family-mono); font-variant-numeric: tabular-nums; }
+
+/* R2 */
+.rail { border-right: var(--stroke-hairline) solid var(--color-border-rule); overflow-y: auto; }
+.sec { padding: var(--space-4); border-bottom: var(--stroke-hairline) solid var(--color-border-rule); }
+.sec-h { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--space-3); }
+.sec-h h2 { margin: 0; font-size: var(--font-size-section); font-weight: var(--font-weight-semibold); }
+.sec-h small { font-size: var(--font-size-caption); color: var(--color-text-tertiary); }
+.sq { display: inline-block; width: 8px; height: 8px; margin-right: var(--space-2); vertical-align: 1px; }
+.t-post { background: var(--color-type-post); } .t-like { background: var(--color-type-like); }
+.t-repost { background: var(--color-type-repost); } .t-follow { background: var(--color-type-follow); }
+.primary-rate .lbl { font-size: var(--font-size-body); color: var(--color-text-secondary); }
+.primary-rate .val { font-size: var(--font-size-rate-primary); font-weight: var(--font-weight-semibold); line-height: 1.2; }
+.primary-rate .val small { font-size: var(--font-size-body); font-weight: var(--font-weight-regular); color: var(--color-text-secondary); }
+.rates { width: 100%; border-collapse: collapse; margin-top: var(--space-3); }
+.rates td { height: var(--density-row-share); }
+.rates td.n { text-align: right; font-family: var(--font-family-mono); font-variant-numeric: tabular-nums; }
+.rates td.d { width: 52px; text-align: right; color: var(--color-text-secondary); }
+.chart { position: relative; height: 120px; }
+.chart svg { width: 100%; height: 100%; display: block; }
+.legend { display: grid; grid-template-columns: 1fr 1fr; gap: 2px var(--space-3); margin-top: var(--space-2); font-size: var(--font-size-caption); color: var(--color-text-secondary); }
+.seg-s button { font-size: var(--font-size-caption); }
+.sample { font-size: var(--font-size-caption); color: var(--color-text-tertiary); margin: calc(var(--space-2) * -1) 0 var(--space-2); }
+.post { height: var(--density-row-stream); padding: var(--space-1) 0; overflow: hidden; }
+.post-h { display: flex; justify-content: space-between; font-size: var(--font-size-caption); }
+.post p { margin: 2px 0 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: var(--font-size-body); line-height: 1.35; }
+.lang { display: grid; grid-template-columns: 36px 1fr 44px 44px; gap: var(--space-2); align-items: center; height: var(--density-row-share); }
+.lang .n { text-align: right; font-family: var(--font-family-mono); font-variant-numeric: tabular-nums; }
+.track { height: var(--stroke-share-bar); background: var(--color-surface-sunken); }
+.track b { display: block; height: 100%; background: var(--color-text-tertiary); }
+
+/* R3 */
+.canvas { position: relative; display: grid; grid-template-rows: auto 1fr var(--size-status-footer); min-width: 0; background: var(--color-surface-sunken); }
+.tabs { display: flex; gap: var(--space-5); padding: 0 var(--space-4); background: var(--color-surface-sheet); border-bottom: var(--stroke-hairline) solid var(--color-border-rule); }
+.tabs button { border: 0; background: transparent; padding: var(--space-3) 0 calc(var(--space-3) - 2px); border-bottom: 2px solid transparent; color: var(--color-text-secondary); cursor: pointer; }
+.tabs button[aria-selected="true"] { color: var(--color-text-primary); border-bottom-color: var(--color-text-primary); font-weight: var(--font-weight-medium); }
+.board { position: relative; overflow: hidden; padding: 40px 48px; display: grid; grid-template-columns: 1.6fr 1fr 1fr; gap: 44px 36px; align-content: start; }
+.cap { font-size: var(--font-size-caption); color: var(--color-text-tertiary); margin-bottom: var(--space-2); }
+.card { position: relative; background: var(--color-surface-sheet); border: var(--stroke-hairline) solid var(--color-border-rule); border-radius: var(--radius-frame); padding: var(--space-5); min-height: 148px; cursor: pointer; }
+.card.trend.e1 { outline: var(--stroke-trend-outline) solid var(--color-event-1); outline-offset: -1px; }
+.card.trend.e2 { outline: var(--stroke-trend-outline) solid var(--color-event-2); outline-offset: -1px; }
+.card.past { color: var(--color-text-tertiary); }
+.cell-L { grid-row: span 2; } .cell-L .card { min-height: 340px; display: flex; flex-direction: column; }
+.card h3 { margin: 0 0 var(--space-1); font-size: var(--font-size-card-m); font-weight: var(--font-weight-semibold); line-height: 1.2; }
+.cell-L h3 { font-size: var(--font-size-card-l); }
+.card .meta { color: var(--color-text-secondary); font-size: var(--font-size-body); }
+.past .meta { color: var(--color-text-tertiary); }
+.spark { width: 100%; height: 32px; margin-top: var(--space-4); display: block; }
+.spark polyline { fill: none; stroke: var(--color-text-secondary); stroke-width: var(--stroke-sparkline); vector-effect: non-scaling-stroke; }
+.trend.e1 .spark polyline { stroke: var(--color-event-1); } .trend.e2 .spark polyline { stroke: var(--color-event-2); }
+.cell-L .spark { height: 48px; } .cell-L .related { margin-top: auto; }
+.quote { margin: var(--space-4) 0 var(--space-2); font-size: var(--font-size-section); line-height: 1.45; }
+.related { font-size: var(--font-size-small); color: var(--color-text-tertiary); }
+.cur { position: absolute; z-index: 2; pointer-events: none; }
+.cur svg { width: var(--size-cursor); height: calc(var(--size-cursor) * 1.3); display: block; }
+.cur b { display: inline-block; margin: var(--size-tag-offset) 0 0 var(--size-tag-offset); padding: 1px 5px; border-radius: var(--radius-tag); color: var(--color-text-on-hue); font: var(--font-weight-medium) var(--font-size-caption)/1.4 var(--font-family-sans); white-space: nowrap; }
+.cur.e1 { color: var(--color-event-1); } .cur.e1 b { background: var(--color-event-1); }
+.cur.e2 { color: var(--color-event-2); } .cur.e2 b { background: var(--color-event-2); }
+.cur.n { color: var(--color-event-neutral); } .cur.n b { background: var(--color-event-neutral); }
+.cur > div { display: flex; align-items: flex-start; }
+.drag { position: absolute; border: var(--stroke-hairline) solid var(--color-event-neutral); }
+.drag .cross { position: absolute; right: calc(var(--space-2) * -1); bottom: calc(var(--space-2) * -1); width: var(--size-cursor); height: var(--size-cursor); }
+.drag span { position: absolute; right: 0; top: calc(100% + var(--space-3)); font: var(--font-size-caption) var(--font-family-mono); color: var(--color-event-neutral); }
+
+.foot { display: flex; align-items: center; gap: var(--space-3); padding: 0 var(--space-4); background: var(--color-surface-sheet); border-top: var(--stroke-hairline) solid var(--color-border-rule); font-size: var(--font-size-small); }
+.foot .grow { flex: 1; }
+.foot .sep { color: var(--color-text-tertiary); }
+
+/* spreading tab */
+.spreading { overflow-y: auto; background: var(--color-surface-sheet); }
+.sp-row { display: grid; grid-template-columns: 28px 1fr auto auto; gap: var(--space-4); align-items: center; min-height: var(--density-row-spreading); padding: var(--space-2) var(--space-4); border-bottom: var(--stroke-hairline) solid var(--color-border-grid); }
+.sp-row p { margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sp-row .who { font-size: var(--font-size-caption); color: var(--color-text-tertiary); }
+.sp-row .nums { text-align: right; font-size: var(--font-size-small); color: var(--color-text-secondary); }
+.sp-row a { color: var(--color-status-accent); font-size: var(--font-size-small); text-decoration: none; }
+
+/* R5 */
+.scrim { z-index: 3; position: absolute; top: var(--tabs-h, 41px); left: 0; right: 0; bottom: var(--size-status-footer); background: var(--color-surface-scrim); }
+.drawer { z-index: 4; position: absolute; top: var(--tabs-h, 41px); right: 0; bottom: var(--size-status-footer); width: var(--size-drawer); background: var(--color-surface-sheet); border-left: var(--stroke-hairline) solid var(--color-border-rule); overflow-y: auto; }
+.drawer header { padding: var(--space-4) var(--space-5); border-bottom: var(--stroke-hairline) solid var(--color-border-rule); }
+.drawer header .row { display: flex; justify-content: space-between; align-items: center; }
+.drawer h3 { margin: var(--space-1) 0 0; font-size: var(--font-size-drawer-title); font-weight: var(--font-weight-semibold); }
+.x { border: 0; background: transparent; font-size: var(--font-size-section); cursor: pointer; color: var(--color-text-secondary); }
+.drawer section { padding: var(--space-4) var(--space-5); border-bottom: var(--stroke-hairline) solid var(--color-border-rule); }
+.drawer h4 { margin: 0 0 var(--space-3); font-size: var(--font-size-section); font-weight: var(--font-weight-semibold); }
+.kv { display: grid; grid-template-columns: 30% 1fr; }
+.kv > * { height: var(--density-row-kv); display: flex; align-items: center; border-bottom: var(--stroke-hairline) solid var(--color-border-grid); }
+.kv dt { font-size: var(--font-size-small); color: var(--color-text-secondary); }
+.kv dd { margin: 0; }
+.axis { display: flex; justify-content: space-between; font-size: var(--font-size-caption); color: var(--color-text-tertiary); }
+.rep p { margin: 0 0 var(--space-1); }
+.rep a { font-size: var(--font-size-caption); color: var(--color-status-accent); text-decoration: none; }
+.rep + .rep { margin-top: var(--space-3); }
+
+/* states */
+.statebar { position: fixed; right: var(--space-4); bottom: calc(var(--size-status-footer) + var(--space-4)); z-index: 9; display: flex; gap: var(--space-1); padding: var(--space-1); background: var(--color-surface-sheet); border: var(--stroke-hairline) solid var(--color-border-rule); border-radius: var(--radius-control); font-size: var(--font-size-caption); }
+.statebar button { border: 0; background: transparent; padding: 2px var(--space-2); border-radius: var(--radius-tag); cursor: pointer; }
+.statebar button[aria-pressed="true"] { background: var(--color-surface-sunken); }
+.empty-msg, .loading-msg { display: none; position: absolute; inset: 0; place-items: center; color: var(--color-text-secondary); text-align: center; }
+[data-state="empty"] .board > *:not(.empty-msg), [data-state="loading"] .board > *:not(.loading-msg) { display: none; }
+[data-state="empty"] .empty-msg, [data-state="loading"] .loading-msg { display: grid; }
+[data-state="stale"] .board .card, [data-state="stale"] .rail .val, [data-state="stale"] .rates td.n { color: var(--color-text-tertiary); }
+[data-state="stale"] .card.trend { outline-color: var(--color-border-rule); }
+[data-state="stale"] .spark polyline, [data-state="stale"] svg polyline { stroke: var(--color-text-tertiary) !important; }
+[data-state="stale"] .cur { display: none; }
+[data-state="loading"] .rail .val .mono, [data-state="loading"] .rates td.n, [data-state="loading"] .lang .n, [data-state="loading"] .foot .mono { visibility: hidden; }
+[data-state="loading"] .rail .val::after { content: "—"; }
+[data-state="loading"] .post p, [data-state="loading"] .post-h { visibility: hidden; }
+[data-state="loading"] .post { background: linear-gradient(var(--color-surface-sunken), var(--color-surface-sunken)) 0 var(--space-2) / 70% 10px no-repeat; }
+[data-state="loading"] .track b, [data-state="empty"] .track b { width: 0 !important; }
+[data-state="loading"] .chart polyline, [data-state="empty"] .chart text { display: none; }
+[data-state="empty"] .chart polyline { visibility: hidden; }
+[data-state="empty"] .post { display: none; }
+[data-state="empty"] .stream-empty { display: block; }
+.stream-empty { display: none; margin: 0; color: var(--color-text-secondary); }
+[data-state="empty"] .sp-row, [data-state="loading"] .sp-row { display: none; }
+[data-state="empty"] .sp-empty, [data-state="loading"] .sp-loading { display: block; }
+.sp-empty, .sp-loading { display: none; padding: var(--space-5); color: var(--color-text-secondary); }
+[data-state="loading"] .top .btn:not(#diagBtn) { opacity: 0.5; pointer-events: none; }
+[data-state="stale"] .stale-label { display: inline; }
+.stale-label { display: none; }
+[data-state="stale"] .dot, [data-state="loading"] .dot { background: var(--color-status-warning); }
+.only-stale, .only-loading { display: none; }
+[data-state="stale"] .only-stale, [data-state="loading"] .only-loading { display: inline; }
+[data-state="stale"] .hide-stale, [data-state="loading"] .hide-loading { display: none; }
+.note { position: fixed; right: var(--space-4); bottom: calc(var(--size-status-footer) + var(--space-4) + 34px); max-width: 300px; margin: 0; text-align: right; font-size: var(--font-size-caption); color: var(--color-text-tertiary); z-index: 9; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="app" id="app" data-state="normal">
+  <header class="top">
+    <div class="wordmark"><span>Jetstream /</span> Trends</div>
+    <div class="grow"></div>
+    <div class="conn" role="status"><i class="dot"></i><span class="hide-stale hide-loading">수신 중</span><span class="only-stale">재연결 중 <span class="mono">3</span></span><span class="only-loading">연결 중</span><span class="mono faint">js2.us-east</span></div>
+    <div class="seg" role="radiogroup" aria-label="수신 범위"><button role="radio" aria-checked="true">주요</button><button role="radio" aria-checked="false">전체</button></div>
+    <button class="btn">일시정지</button>
+    <div class="avatars" aria-label="지금 화면의 커서"><i class="e1">A</i><i class="e2">S</i><i>W</i><i>G</i><i>T</i><i>M</i><i class="more mono">+17</i></div>
+    <button class="btn" id="diagBtn" aria-pressed="false" aria-controls="diag">진단</button>
+  </header>
+  <div class="body" id="body">
+    <aside class="rail" aria-label="수집 데이터">
+      <section class="sec">
+        <div class="sec-h"><h2>수신량</h2><small><span class="stale-label">멈춤 <span class="mono">12</span>초 · </span>최근 1분 평균 대비</small></div>
+        <div class="primary-rate">
+          <div class="lbl"><span class="sq t-post"></span>글 / 초</div>
+          <div class="val"><span class="mono">40.7</span> <small>안정</small></div>
+        </div>
+        <table class="rates">
+          <tr><td><span class="sq t-like"></span>좋아요</td><td class="n">276.3/s</td><td class="d">안정</td></tr>
+          <tr><td><span class="sq t-repost"></span>리포스트</td><td class="n">44.6/s</td><td class="d">↑<span class="mono">4</span>%</td></tr>
+          <tr><td><span class="sq t-follow"></span>팔로우</td><td class="n">20.2/s</td><td class="d">↓<span class="mono">7</span>%</td></tr>
+        </table>
+      </section>
+      <section class="sec">
+        <div class="sec-h"><h2>최근 1분</h2><div class="seg seg-s"><button aria-checked="true" role="radio">1분</button><button aria-checked="false" role="radio">5분</button></div></div>
+        <div class="chart">
+          <svg viewBox="0 0 264 120" preserveAspectRatio="none" aria-label="초당 이벤트 수, 최근 60초">
+            <line x1="0" x2="264" y1="20" y2="20" stroke="var(--color-border-grid)"/>
+            <line x1="0" x2="264" y1="60" y2="60" stroke="var(--color-border-grid)"/>
+            <line x1="0" x2="264" y1="100" y2="100" stroke="var(--color-border-grid)"/>
+            <polyline fill="none" stroke="var(--color-type-like)" style="stroke-width:var(--stroke-sparkline)" points="0,34 12,30 24,37 36,29 48,33 60,26 72,35 84,31 96,28 108,36 120,30 132,27 144,33 156,29 168,35 180,31 192,26 204,32 216,30 232,32"/>
+            <polyline fill="none" stroke="var(--color-type-repost)" style="stroke-width:var(--stroke-sparkline)" points="0,92 12,90 24,93 36,89 48,91 60,88 72,92 84,90 96,91 108,89 120,92 132,90 144,88 156,91 168,92 180,89 192,90 204,93 216,91 232,92"/>
+            <polyline fill="none" stroke="var(--color-type-post)" style="stroke-width:var(--stroke-sparkline)" points="0,94 12,95 24,93 36,96 48,94 60,93 72,95 84,94 96,92 108,95 120,94 132,93 144,95 156,94 168,93 180,95 192,94 204,93 216,94 232,95"/>
+            <polyline fill="none" stroke="var(--color-type-follow)" style="stroke-width:var(--stroke-sparkline)" points="0,104 12,103 24,105 36,104 48,103 60,105 72,104 84,103 96,104 108,105 120,103 132,104 144,105 156,103 168,104 180,105 192,104 204,103 216,104 232,104"/>
+            <text x="200" y="22" style="font-size:var(--font-size-caption)" fill="var(--color-type-like)" text-anchor="end">좋아요 276</text>
+            <text x="200" y="80" style="font-size:var(--font-size-caption)" fill="var(--color-type-repost)" text-anchor="end">리포스트 45</text>
+            <text x="264" y="98" style="font-size:var(--font-size-caption)" fill="var(--color-type-post)" text-anchor="end">글 41</text>
+            <text x="264" y="117" style="font-size:var(--font-size-caption)" fill="var(--color-type-follow)" text-anchor="end">팔로우 20</text>
+          </svg>
+        </div>
+      </section>
+      <section class="sec">
+        <div class="sec-h"><h2>새 글</h2><small class="only-stale">멈춤 — 재연결 중</small></div>
+        <p class="stream-empty">아직 받은 글이 없습니다</p>
+        <p class="sample"><span class="mono">3</span>건 중 <span class="mono">1</span>건 표시 · 초당 <span class="mono">12</span>건 표본</p>
+        <div class="post"><div class="post-h"><span class="mono">11:04:51<span class="faint">.064</span></span><span class="mono faint">ko</span></div><p>마지막 회차 보고 나서 다들 같은 얘기 하는 중이네, 결말 해석이 세 갈래로 갈림</p></div>
+        <div class="post"><div class="post-h"><span class="mono">11:04:50<span class="faint">.964</span></span><span class="mono faint">en</span></div><p>Right on the money. The senator walked it back in 40 minutes and nobody noticed</p></div>
+        <div class="post"><div class="post-h"><span class="mono">11:04:50<span class="faint">.963</span></span><span class="mono faint">es</span></div><p>Pack de seis unidades de desodorante, llegó hoy con dos días de retraso</p></div>
+        <div class="post"><div class="post-h"><span class="mono">11:04:50<span class="faint">.664</span></span><span class="mono faint">ja</span></div><p>本日の公開分、まとめて見ました。三話目が良かった</p></div>
+      </section>
+      <section class="sec">
+        <div class="sec-h"><h2>언어</h2><small>최근 <span class="mono">60</span>초 · <span class="mono">2,009</span>건</small></div>
+        <div class="lang"><span>en</span><div class="track"><b style="width:76.4%"></b></div><span class="n">1,534</span><span class="n faint">76.4%</span></div>
+        <div class="lang"><span>ja</span><div class="track"><b style="width:14.3%"></b></div><span class="n">287</span><span class="n faint">14.3%</span></div>
+        <div class="lang"><span>pt</span><div class="track"><b style="width:4.1%"></b></div><span class="n">83</span><span class="n faint">4.1%</span></div>
+        <div class="lang"><span>ko</span><div class="track"><b style="width:2%"></b></div><span class="n">41</span><span class="n faint">2.0%</span></div>
+        <div class="lang"><span>de</span><div class="track"><b style="width:1.3%"></b></div><span class="n">27</span><span class="n faint">1.3%</span></div>
+        <div class="lang"><span>기타</span><div class="track"><b style="width:1.8%"></b></div><span class="n">37</span><span class="n faint">1.8%</span></div>
+      </section>
+    </aside>
+
+    <main class="canvas">
+      <nav class="tabs" role="tablist">
+        <button role="tab" aria-selected="true" data-tab="board">트렌드 카드</button>
+        <button role="tab" aria-selected="false" data-tab="spreading">반응 몰리는 글</button>
+      </nav>
+
+      <div class="board" id="board">
+        <p class="loading-msg">스트림에 연결하는 중</p>
+        <p class="empty-msg">많이 나오는 말을 모으는 중 — 몇 초 뒤 카드가 그려집니다</p>
+        <div class="cell-L">
+          <div class="cap">해시태그 · 트렌드 · en</div>
+          <article class="card trend e1" data-open>
+            <h3>#aewdynamite</h3>
+            <div class="meta">평소의 <span class="mono">7.6</span>배 · 작성자 <span class="mono">153</span>명 · ↑ 늘어나는 중</div>
+            <svg class="spark" viewBox="0 0 100 30" preserveAspectRatio="none"><polyline points="0,28 10,28 20,27 30,28 40,27 50,26 60,24 70,19 80,13 90,8 100,4"/></svg>
+            <p class="quote">“Ciampa vs Ilja at full gear #AEWDynamite”</p>
+            <div class="related">ciampa · ilja · aew</div>
+          </article>
+        </div>
+        <div>
+          <div class="cap">단어 · 관찰 중 · en</div>
+          <article class="card"><h3>senator</h3><div class="meta">평소의 <span class="mono">3.8</span>배 · 작성자 <span class="mono">38</span>명</div><svg class="spark" viewBox="0 0 100 30" preserveAspectRatio="none"><polyline points="0,26 10,27 20,25 30,26 40,24 50,22 60,23 70,18 80,16 90,15 100,13"/></svg></article>
+        </div>
+        <div>
+          <div class="cap">구 · 관찰 중 · en</div>
+          <article class="card"><h3>jensen huang</h3><div class="meta">평소의 <span class="mono">3.5</span>배 · 작성자 <span class="mono">12</span>명</div><svg class="spark" viewBox="0 0 100 30" preserveAspectRatio="none"><polyline points="0,28 10,28 20,28 30,27 40,27 50,25 60,20 70,17 80,12 90,10 100,7"/></svg></article>
+        </div>
+        <div>
+          <div class="cap">단어 · 관찰 중 · ja</div>
+          <article class="card"><h3>紹介</h3><div class="meta">평소의 <span class="mono">3.7</span>배 · 작성자 <span class="mono">9</span>명</div><svg class="spark" viewBox="0 0 100 30" preserveAspectRatio="none"><polyline points="0,24 10,25 20,23 30,24 40,22 50,23 60,21 70,20 80,21 90,18 100,17"/></svg></article>
+        </div>
+        <div>
+          <div class="cap">단어 · 지나간 트렌드 · en</div>
+          <article class="card past"><h3>mississippi</h3><div class="meta">최고 평소의 <span class="mono">38</span>배 · <span class="mono">6</span>분 전 끝남</div><svg class="spark" viewBox="0 0 100 30" preserveAspectRatio="none"><polyline points="0,27 10,22 20,12 30,6 40,5 50,9 60,15 70,20 80,24 90,26 100,27"/></svg></article>
+        </div>
+
+        <div class="cur e1" style="left:38%;top:92px"><div><svg viewBox="0 0 14 18"><path d="M1 1l11 7-5 1.3L4.6 16z" fill="currentColor" stroke="var(--color-text-on-hue)" stroke-width="1"/></svg><b>aewdynamite</b></div></div>
+        <div class="cur e1" style="left:9%;top:318px"><div><svg viewBox="0 0 14 18"><path d="M1 1l11 7-5 1.3L4.6 16z" fill="currentColor" stroke="var(--color-text-on-hue)" stroke-width="1"/></svg><b>ciampa</b></div></div>
+        <div class="cur n" style="left:84%;top:176px"><div><svg viewBox="0 0 14 18"><path d="M1 1l11 7-5 1.3L4.6 16z" fill="currentColor" stroke="var(--color-text-on-hue)" stroke-width="1"/></svg><b>jensen</b></div></div>
+        <div class="cur n" style="left:61%;top:206px"><div><svg viewBox="0 0 14 18"><path d="M1 1l11 7-5 1.3L4.6 16z" fill="currentColor" stroke="var(--color-text-on-hue)" stroke-width="1"/></svg><b>senator</b></div></div>
+        <div class="cur n" style="left:0;top:440px"><div><svg viewBox="0 0 14 18"><path d="M1 1l11 7-5 1.3L4.6 16z" fill="currentColor" stroke="var(--color-text-on-hue)" stroke-width="1"/></svg><b>wonderful</b></div></div>
+        <div class="drag" style="left:66%;top:414px;width:312px;height:176px"><span>312×176</span><svg class="cross" viewBox="0 0 14 14"><path d="M7 0v14M0 7h14" stroke="var(--color-event-neutral)" stroke-width="1.5"/></svg></div>
+      </div>
+
+      <section class="spreading" id="spreading" hidden>
+        <p class="sp-empty">아직 <span class="mono">5</span>분 안에 반응이 몰린 글이 없습니다</p>
+        <p class="sp-loading">불러오는 중</p>
+        <div class="sp-row"><span class="mono faint">1</span><div><p>the senator walked it back in 40 minutes, the clip is wild</p><span class="who">@mirela.bsky.social</span></div><span class="nums">5분 <span class="mono">23</span>명 · 30분 <span class="mono">61</span>명 · 떠오름</span><a href="#">원문</a></div>
+        <div class="sp-row"><span class="mono faint">2</span><div><p>本日の公開分、まとめて見ました。三話目が良かった</p><span class="who">@kotone-w.bsky.social</span></div><span class="nums">5분 <span class="mono">17</span>명 · 30분 <span class="mono">88</span>명 · 식는 중</span><a href="#">원문</a></div>
+      </section>
+
+      <footer class="foot">
+        <span><i class="dot" style="display:inline-block;margin-right:6px"></i><span class="hide-stale hide-loading">수신 중</span><span class="only-stale">재연결 중 <span class="mono">3</span></span><span class="only-loading">연결 중</span></span>
+        <span class="sep">·</span><span><span class="mono">41.2</span> 글/초</span>
+        <span class="sep">·</span><span>트렌드 <span class="mono">1</span> · 관찰 <span class="mono">7</span></span>
+        <span class="grow"></span>
+        <span class="faint">마지막 이벤트 <span class="mono hide-stale">0.4</span><span class="mono only-stale">14</span>초 전</span>
+      </footer>
+
+      <div class="scrim" id="scrim" hidden></div>
+      <aside class="drawer" id="drawer" hidden aria-label="이벤트 상세">
+        <header>
+          <div class="row"><span class="cap" style="margin:0">해시태그 · 트렌드 · 떠오름</span><button class="x" id="close" aria-label="닫기">×</button></div>
+          <h3>#aewdynamite</h3>
+        </header>
+        <section>
+          <dl class="kv">
+            <dt>평소 대비</dt><dd><span class="mono">×7.6</span></dd>
+            <dt>5분 작성자</dt><dd><span class="mono">153</span>명</dd>
+            <dt>새로 합류</dt><dd><span class="mono">62</span>%</dd>
+            <dt>점수</dt><dd><span class="mono">41.3</span></dd>
+            <dt>처음 잡힌 시각</dt><dd><span class="mono">11:02:17</span></dd>
+          </dl>
+        </section>
+        <section>
+          <h4>최근 15분</h4>
+          <svg class="spark" viewBox="0 0 100 30" preserveAspectRatio="none" style="margin:0;height:56px"><polyline style="stroke:var(--color-event-1)" points="0,28 10,28 20,27 30,28 40,27 50,26 60,24 70,19 80,13 90,8 100,4"/></svg>
+          <div class="axis"><span>−<span class="mono">15</span>분</span><span>지금</span></div>
+        </section>
+        <section>
+          <h4>대표 글</h4>
+          <div class="rep"><p>“Ciampa vs Ilja at full gear #AEWDynamite”</p><a href="#"><span class="mono">2</span>분 전 · bsky.app</a></div>
+        </section>
+        <section><h4>관련 단어</h4><div class="dim">ciampa · ilja · aew · full gear</div></section>
+        <section><h4>링크</h4><div class="faint">—</div></section>
+      </aside>
+    </main>
+    <aside class="diag" id="diag" hidden aria-label="진단">
+      <h2>진단</h2>
+      <div class="r"><span>recv/s</span><span>1,384</span></div>
+      <div class="r"><span>drop/s</span><span>0</span></div>
+      <div class="r"><span>tracked</span><span>8,417 / 30,000</span></div>
+      <div class="r"><span>frame p95</span><span>7.9 ms</span></div>
+      <div class="r"><span>ws</span><span><span class="only-stale">reconnecting</span><span class="hide-stale">live 0.4s</span></span></div>
+    </aside>
+  </div>
+</div>
+
+<div class="statebar" role="group" aria-label="상태 미리보기">
+  <button aria-pressed="true" data-s="normal">정상</button>
+  <button aria-pressed="false" data-s="loading">연결 중</button>
+  <button aria-pressed="false" data-s="empty">빈 화면</button>
+  <button aria-pressed="false" data-s="stale">재연결</button>
+</div>
+<p class="note">Light theme only — the DS has no dark tokens yet (see 07-handoff open questions). No up/down colour tokens: rising/falling is text.</p>
+
+<script>
+  const app = document.getElementById("app");
+  document.querySelectorAll(".statebar button").forEach((b) => b.addEventListener("click", () => {
+    app.dataset.state = b.dataset.s;
+    document.querySelectorAll(".statebar button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  }));
+  document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => {
+    document.querySelectorAll(".tabs button").forEach((x) => x.setAttribute("aria-selected", String(x === b)));
+    document.getElementById("board").hidden = b.dataset.tab !== "board";
+    document.getElementById("spreading").hidden = b.dataset.tab !== "spreading";
+  }));
+  const drawer = document.getElementById("drawer"), scrim = document.getElementById("scrim");
+  const setDrawer = (open) => { drawer.hidden = !open; scrim.hidden = !open; };
+  document.querySelector("[data-open]").addEventListener("click", () => setDrawer(true));
+  document.getElementById("close").addEventListener("click", () => setDrawer(false));
+  scrim.addEventListener("click", () => setDrawer(false));
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") setDrawer(false); });
+  const diagBtn = document.getElementById("diagBtn");
+  diagBtn.addEventListener("click", () => {
+    const open = diagBtn.getAttribute("aria-pressed") !== "true";
+    diagBtn.setAttribute("aria-pressed", String(open));
+    document.getElementById("diag").hidden = !open;
+    document.getElementById("body").classList.toggle("diag-open", open);
+  });
+  document.querySelectorAll(".seg").forEach((g) => g.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+    g.querySelectorAll("button").forEach((x) => x.setAttribute("aria-checked", String(x === b)));
+  })));
+</script>
+</body>
+</html>

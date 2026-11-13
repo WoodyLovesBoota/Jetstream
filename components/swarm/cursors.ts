@@ -24,22 +24,25 @@ export const ICONS: Record<Shape, { svg: string; hx: number; hy: number }> = {
   },
 };
 
-/** 이벤트 12색 팔레트 (지시서 8.2) */
-export const COLORS = [
-  "#FF5C39", "#8B5CF6", "#0EA5E9", "#10B981", "#F43F5E", "#F5A30B",
-  "#6366F1", "#EC4899", "#14B8A6", "#3B82F6", "#F97316", "#65A30D",
-] as const;
+/**
+ * 트렌드 카드 식별색 — 커서·이름표·카드 외곽선에만 쓴다(design/jetstream-trends-live 06-tokens color.event).
+ * 타입 펜·상태색과 색상각 30° 이상 떨어진 두 색만 남기고, 기록지 글자 대비 4.5:1이 되게 어둡게 했다.
+ */
+export const COLORS = ["#692cf3", "#477209"] as const;
 
-/** 무소속 커서 */
-export const IDLE_COLOR = "#7a7a7a";
+/** 관찰 카드·무소속 커서 — 중립(--ink-3) */
+export const IDLE_COLOR = "#5e6a71";
 
-/** 밝은 색 위엔 어두운 글자, 그 외 흰 글자 */
-export function tagInk(hex: string): string {
-  const n = parseInt(hex.slice(1), 16);
-  const l = (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255;
-  return l > 0.62 ? "#1a1814" : "#ffffff";
+/** 이름표 글자색 — 모든 식별색이 기록지 글자 4.5:1을 넘으므로 기록지 색 하나 */
+export function tagInk(): string {
+  return "#f2f4f1";
 }
 
 export function eventColor(colorIdx: number): string {
   return COLORS[((colorIdx % COLORS.length) + COLORS.length) % COLORS.length];
+}
+
+/** 카드 상태에 맞는 색 — 트렌드만 식별색, 관찰·지나간 카드는 중립 */
+export function cardColor(ev: { state: string; colorIdx: number }): string {
+  return ev.state === "active" ? eventColor(ev.colorIdx) : IDLE_COLOR;
 }

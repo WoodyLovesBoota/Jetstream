@@ -98,6 +98,11 @@
 
 .time {
   flex: none;
+  color: var(--ink);
+}
+
+/* 초 아래(ms)는 흐리게 — 바뀌는 건 초다 */
+.frac {
   color: var(--ink-3);
 }
 
@@ -138,4 +143,13 @@
   font-size: 13px;
   color: var(--ink-3);
   white-space: nowrap;
+}
+
+/* 레일 행: 시각 · (언어는 오른쪽 끝) — DID는 커서 미리보기에서 본다 */
+.did {
+  display: none;
+}
+
+.langs {
+  margin-left: auto;
 }
