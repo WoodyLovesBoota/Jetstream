@@ -57,17 +57,20 @@ export default function SwarmCanvas() {
           setPreview(null);
         },
         onOpenCursor: (row, color, x, y) => setPreview({ row, color, x, y }),
-        // 데이터 레일 Tape의 맨 위(새 글이 들어오는 자리)에서 집어 온다 — 보드 좌표로
+        // 데이터 레일 Tape의 맨 위 행들(새 글이 들어오는 자리)에서 집어 온다 — 보드 좌표로.
+        // 레이어가 레일까지 덮으므로 x는 음수(레일 안)여도 보인다
         origin: () => {
           const src = document.querySelector<HTMLElement>("[data-swarm-origin]");
           if (src === null || src.offsetParent === null) return null;
           const s = src.getBoundingClientRect();
           const v = viewport.getBoundingClientRect();
-          const y = Math.min(Math.max(s.top - v.top + 40 + Math.random() * 90, 20), v.height - 20);
-          return { x: s.right - v.left - 6, y: y + viewport.scrollTop };
+          const x = s.left + s.width * (0.45 + Math.random() * 0.45);
+          const y = s.top + 44 + Math.random() * Math.min(150, Math.max(20, s.height - 60));
+          return { x: x - v.left, y: y - v.top + viewport.scrollTop };
         },
       },
       reduced,
+      viewport.closest<HTMLElement>(".shell-body"),
     );
     board.dataset.reduced = String(reduced);
     ctl.setPaused(isRenderPaused());
@@ -104,7 +107,7 @@ export default function SwarmCanvas() {
           empty.hidden = s.trend.events.length > 0;
           empty.textContent = s.trend.learning.active
             ? `평소를 배우는 중입니다 — ${s.trend.learning.minutes}분 / 10분. 학습이 끝나면 평소보다 설명되지 않게 늘어나는 것이 여기 카드로 그려집니다.`
-            : "지금 많이 나오는 말을 모으는 중입니다. 몇 초 뒤 커서가 왼쪽 데이터에서 카드를 그립니다.";
+            : "지금 많이 나오는 말을 모으는 중입니다. 몇 초 뒤 커서가 왼쪽 새 글에서 출발해 카드를 그립니다.";
         }
         hydrator?.want([...s.trend.spreading.map((p) => p.uri), ...s.trend.events.flatMap((e) => (e.postUri !== null ? [e.postUri] : []))]);
         // 열린 카드는 최신 값으로
@@ -245,14 +248,16 @@ export default function SwarmCanvas() {
             </div>
           </section>
           <section>
-            <h3>대표 글</h3>
+            <h3>
+              대표 글 <span className="sw-drawer-count sw-num">{ev.representativePosts.length}</span>
+            </h3>
             {ev.representativePosts.length > 0 ? (
               <ul className="sw-drawer-posts">
                 {ev.representativePosts.map((p) => (
                   <li key={`${p.did}/${p.rkey}`}>
-                    <p>{p.text}</p>
                     <a href={p.url} target="_blank" rel="noopener noreferrer">
-                      {ago(p.timeMs)} · bsky.app
+                      <p>{p.text || "(본문 없음)"}</p>
+                      <span>{ago(p.timeMs)} · bsky.app</span>
                     </a>
                   </li>
                 ))}

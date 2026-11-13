@@ -25,13 +25,32 @@ export const ICONS: Record<Shape, { svg: string; hx: number; hy: number }> = {
 };
 
 /**
- * 트렌드 카드 식별색 — 커서·이름표·카드 외곽선에만 쓴다(design/jetstream-trends-live 06-tokens color.event).
- * 타입 펜·상태색과 색상각 30° 이상 떨어진 두 색만 남기고, 기록지 글자 대비 4.5:1이 되게 어둡게 했다.
+ * 트렌드 카드 식별색 — 커서·이름표·카드 외곽선에 쓴다(design/jetstream-trends-live 06-tokens color.event).
+ * 색상환을 고르게 도는 12색(엔진 PALETTE=12와 같은 길이). 모두 기록지 글자(#f2f4f1) 대비 4.5:1 이상이다.
+ * 이웃 colorIdx끼리 색상각이 멀어지도록 순서를 섞었다.
  */
-export const COLORS = ["#692cf3", "#477209"] as const;
+export const COLORS = [
+  "#692cf3", // violet
+  "#15803d", // green
+  "#c2410c", // orange
+  "#0369a1", // sky
+  "#c0266d", // pink
+  "#477209", // olive
+  "#1d4ed8", // blue
+  "#b45309", // amber
+  "#a21caf", // magenta
+  "#0f766e", // teal
+  "#be123c", // rose
+  "#0e7490", // cyan
+] as const;
 
-/** 관찰 카드·무소속 커서 — 중립(--ink-3) */
+/** 지나간 카드 — 중립(--ink-3) */
 export const IDLE_COLOR = "#5e6a71";
+
+/** 무소속 커서 색 — 회색 대신 팔레트에서 무작위로 골라 저마다 다른 사람처럼 보이게 한다 */
+export function wanderColor(): string {
+  return COLORS[Math.floor(Math.random() * COLORS.length)];
+}
 
 /** 이름표 글자색 — 모든 식별색이 기록지 글자 4.5:1을 넘으므로 기록지 색 하나 */
 export function tagInk(): string {
@@ -42,7 +61,7 @@ export function eventColor(colorIdx: number): string {
   return COLORS[((colorIdx % COLORS.length) + COLORS.length) % COLORS.length];
 }
 
-/** 카드 상태에 맞는 색 — 트렌드만 식별색, 관찰·지나간 카드는 중립 */
+/** 카드 상태에 맞는 색 — 트렌드·관찰 카드는 식별색, 지나간 카드만 중립 */
 export function cardColor(ev: { state: string; colorIdx: number }): string {
-  return ev.state === "active" ? eventColor(ev.colorIdx) : IDLE_COLOR;
+  return ev.state === "past" ? IDLE_COLOR : eventColor(ev.colorIdx);
 }

@@ -83,10 +83,11 @@ describe("이벤트 카드", () => {
     expect(card?.related).not.toContain("#eclipse2026");
   });
 
-  it("대표 글 2개 — 서로 다른 작성자, bsky.app 링크", () => {
+  it("대표 글 최대 5개 — 서로 다른 작성자, bsky.app 링크", () => {
     const posts = card?.representativePosts ?? [];
-    expect(posts.length).toBe(2);
-    expect(posts[0].did).not.toBe(posts[1].did);
+    expect(posts.length).toBeGreaterThanOrEqual(2);
+    expect(posts.length).toBeLessThanOrEqual(5);
+    expect(new Set(posts.map((p) => p.did)).size).toBe(posts.length);
     expect(posts[0].url).toMatch(/^https:\/\/bsky\.app\/profile\/did:plc:ecl\d+\/post\/3k/);
     expect(posts[0].text).toContain("eclipse");
   });

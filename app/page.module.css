@@ -44,3 +44,18 @@
   height: 252px;
   border-bottom: 1px solid var(--rule);
 }
+
+/* 레일 — 시트를 통째로 칠하지 않고, 계기 하나하나를 캔버스 카드와 같은 프레임(1px 괘선·각진 모서리)으로
+   모눈판 위에 띄운다. 레일과 캔버스가 한 판 위의 프레임들로 읽히게 */
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4, 16px);
+}
+
+.rail > section {
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  color: var(--ink);
+  color-scheme: light;
+}

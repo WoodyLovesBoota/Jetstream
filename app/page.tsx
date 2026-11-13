@@ -19,7 +19,7 @@ export default function Home() {
     <Shell
       canvas={<SwarmCanvas />}
       rail={
-        <div className={styles.sheet}>
+        <div className={styles.rail}>
           <Panel name="수신량" note="최근 1분 평균 대비" className={styles.pulse} readouts={<Gauges />}>
             <Pulse />
           </Panel>

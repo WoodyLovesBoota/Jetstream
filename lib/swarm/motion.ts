@@ -124,3 +124,50 @@ export function repel(a: Body, b: Body, minDist: number): void {
   b.x += ux * push;
   b.y += uy * push;
 }
+
+// ── 글자 칸 편집(커서가 바뀐 글자를 지우고 다시 친다) ─────────────────────
+
+/** 공통 접두 길이 — 서로게이트 쌍을 가르지 않는다 */
+export function commonPrefix(a: string, b: string): number {
+  const n = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < n && a.charCodeAt(i) === b.charCodeAt(i)) i++;
+  if (i > 0 && i < a.length && a.charCodeAt(i - 1) >= 0xd800 && a.charCodeAt(i - 1) <= 0xdbff) i--;
+  return i;
+}
+
+/** 공통 접미 길이(접두와 겹치지 않게) — 서로게이트 쌍을 가르지 않는다 */
+function commonSuffix(a: string, b: string, prefix: number): number {
+  const n = Math.min(a.length, b.length) - prefix;
+  let i = 0;
+  while (i < n && a.charCodeAt(a.length - 1 - i) === b.charCodeAt(b.length - 1 - i)) i++;
+  if (i > 0 && i < a.length) {
+    const c = a.charCodeAt(a.length - i);
+    if (c >= 0xdc00 && c <= 0xdfff) i--;
+  }
+  return i;
+}
+
+/**
+ * 바뀐 가운데 조각을 한 타건만큼 고친다 — 앞뒤 공통부분은 그대로 두고, 가운데를 뒤에서부터 지운 뒤(⌫, 길면 단어 단위)
+ * 목표 글자를 앞에서부터 끼워 넣는다. 돌려주는 caret은 고친 자리(다음 타건 위치)다.
+ */
+export function editStep(shown: string, target: string): { text: string; caret: number; typed: string | null } {
+  const pre = commonPrefix(shown, target);
+  const suf = commonSuffix(shown, target, pre);
+  const end = shown.length - suf;
+  if (end > pre) {
+    const mid = shown.slice(pre, end);
+    let span = 1;
+    if (mid.length > 10) {
+      const cut = mid.lastIndexOf(" ", mid.length - 2);
+      span = Math.max(1, mid.length - (cut + 1));
+    } else {
+      const c = mid.charCodeAt(mid.length - 1);
+      if (c >= 0xdc00 && c <= 0xdfff && mid.length >= 2) span = 2;
+    }
+    return { text: shown.slice(0, end - span) + shown.slice(end), caret: end - span, typed: null };
+  }
+  const ch = String.fromCodePoint(target.codePointAt(pre) ?? 32);
+  return { text: shown.slice(0, pre) + ch + shown.slice(pre), caret: pre + ch.length, typed: ch };
+}

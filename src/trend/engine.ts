@@ -26,6 +26,9 @@ import { BucketSeries, TrackedTable } from "./tracked.ts";
 import type { EngagePing, SpreadingPost, TrendEvent, TrendMember, TrendPost, TrendSnapshot, TrendStats } from "./types.ts";
 import { normalizeUrl } from "./url.ts";
 
+/** 이벤트 상세 서랍에 싣는 대표 글 수 */
+const REP_POSTS = 5;
+
 const MIN_MS = 60_000;
 const PALETTE = 12;
 /** 퍼지는 글 후보로 보는 최소 5분 참여자 */
@@ -135,6 +138,8 @@ export class TrendEngine {
   private readonly watchIds = new Map<string, { id: number; since: number }>();
   private spreadingKeys = new Map<string, number | null>();
   private nextEventId = 1;
+  /** 이벤트 ID → 식별색. 한 번 정하면 카드가 사는 동안 바뀌지 않는다 */
+  private readonly colorOfId = new Map<number, number>();
   private readonly hasPrior: boolean;
   private readonly sessionStartMs: number;
   private readonly sessionStartMin: number;
@@ -882,7 +887,33 @@ export class TrendEngine {
       .filter((e) => e.state === "past")
       .sort((x, y) => (y.exitedAt ?? 0) - (x.exitedAt ?? 0))
       .slice(0, Math.max(0, c.maxEvents - active.length - watch.length));
-    return [...active, ...watch, ...past];
+    return this.paint([...active, ...watch, ...past]);
+  }
+
+  /**
+   * 식별색 배정 — `(id - 1) % PALETTE`는 ID가 12 차이 나는 카드끼리 같은 색이 됐다.
+   * 새 카드에는 지금 화면에 있는 카드들이 가장 적게 쓰는 색을 준다(동률이면 ID 기반 회전으로 고른다).
+   * 이미 색이 있는 카드는 그대로 둬서 깜빡이지 않게 한다.
+   */
+  private paint(events: TrendEvent[]): TrendEvent[] {
+    const live = new Set(events.map((e) => e.id));
+    for (const id of this.colorOfId.keys()) if (!live.has(id)) this.colorOfId.delete(id);
+    const use = new Array<number>(PALETTE).fill(0);
+    for (const ci of this.colorOfId.values()) use[ci]++;
+    return events.map((e) => {
+      let ci = this.colorOfId.get(e.id);
+      if (ci === undefined) {
+        const start = (e.id * 5) % PALETTE;
+        ci = start;
+        for (let i = 1; i < PALETTE; i++) {
+          const j = (start + i) % PALETTE;
+          if (use[j] < use[ci]) ci = j;
+        }
+        this.colorOfId.set(e.id, ci);
+        use[ci]++;
+      }
+      return ci === e.colorIdx ? e : { ...e, colorIdx: ci };
+    });
   }
 
   /**
@@ -1038,23 +1069,22 @@ export class TrendEngine {
     }
     const all = [...seen.values()];
     const multi = all.filter((x) => x.count >= 2 && x.post.rkey !== "");
-    let reps: RecentPost[];
+    // 여러 멤버에 걸친 글(참여 많은 순)을 먼저, 모자라면 최근 글로 채운다 — 작성자당 1개, 최대 REP_POSTS개
+    const reps: RecentPost[] = [];
+    const authors = new Set<string>();
+    const take = (p: RecentPost): void => {
+      if (reps.length >= REP_POSTS || authors.has(p.did)) return;
+      authors.add(p.did);
+      reps.push(p);
+    };
     if (multi.length > 0) {
       const eng = (p: RecentPost): number => {
         const s = this.engage.slotOf(`p:${postUri(p.did, p.rkey)}`);
         return s >= 0 ? this.engage.stats(s, minute, c.engageShortMin).p5 : 0;
       };
-      reps = multi.sort((x, y) => eng(y.post) - eng(x.post) || y.post.timeMs - x.post.timeMs).slice(0, 2).map((x) => x.post);
-    } else {
-      reps = [];
-      const authors = new Set<string>();
-      for (const x of all.filter((x) => x.post.rkey !== "").sort((p, q) => q.post.timeMs - p.post.timeMs)) {
-        if (authors.has(x.post.did)) continue;
-        authors.add(x.post.did);
-        reps.push(x.post);
-        if (reps.length >= 2) break;
-      }
+      for (const x of multi.sort((x, y) => eng(y.post) - eng(x.post) || y.post.timeMs - x.post.timeMs)) take(x.post);
     }
+    for (const x of all.filter((x) => x.post.rkey !== "").sort((p, q) => q.post.timeMs - p.post.timeMs)) take(x.post);
     const representativePosts: TrendPost[] = reps.map((p) => ({
       did: p.did,
       rkey: p.rkey,
@@ -1145,7 +1175,7 @@ export class TrendEngine {
           url: `https://bsky.app/profile/${known.did}/post/${known.rkey}`,
           langs: known.langs,
         });
-        representativePosts.length = Math.min(representativePosts.length, 2);
+        representativePosts.length = Math.min(representativePosts.length, REP_POSTS);
       }
     } else if (titleKind === "u") {
       title = titleMember.label.replace(/^[^/]+\//, (d) => d).slice(0, 80);

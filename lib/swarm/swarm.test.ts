@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { layoutCards, DEFAULT_LAYOUT } from "./layout";
-import { bendAmount, dragEase, orbitRectTarget, orbitTarget, pathPoint, repel, smoother, springStep, travelTime, typeDelay } from "./motion";
+import { bendAmount, commonPrefix, editStep, dragEase, orbitRectTarget, orbitTarget, pathPoint, repel, smoother, springStep, travelTime, typeDelay } from "./motion";
 
 describe("스웜 모션 수식 (레퍼런스 수치)", () => {
   it("이동 시간 = min(1, 0.16 + √d·0.019) / speed", () => {
@@ -111,5 +111,43 @@ describe("카드 배치", () => {
       const { rects } = layoutCards(items, { ...DEFAULT_LAYOUT, pad: 16, width });
       for (const r of rects) expect(r.x + r.w).toBeLessThanOrEqual(width);
     }
+  });
+});
+
+describe("editStep — 바뀐 조각만 고친다", () => {
+  const run = (from: string, to: string): { steps: number; touched: number[] } => {
+    let s = from;
+    const touched: number[] = [];
+    let steps = 0;
+    while (s !== to && steps < 1000) {
+      const st = editStep(s, to);
+      s = st.text;
+      touched.push(st.caret);
+      steps++;
+    }
+    expect(s).toBe(to);
+    return { steps, touched };
+  };
+
+  it("숫자 하나 바뀌면 그 글자만 지우고 친다", () => {
+    const { steps, touched } = run("평소의 2.4배 · 작성자 12명", "평소의 2.1배 · 작성자 12명");
+    expect(steps).toBe(2);
+    expect(Math.min(...touched)).toBe("평소의 2.".length);
+  });
+
+  it("빈 칸에서 처음부터 친다·전부 지운다·이모지 쌍을 가르지 않는다", () => {
+    run("", "trump greenland");
+    run("hello world, long sentence here", "");
+    const { touched } = run("a😀b", "a😃b");
+    expect(touched.every((c) => c !== 2)).toBe(true);
+  });
+
+  it("긴 조각은 단어 단위로 지워 빨리 끝난다", () => {
+    const { steps } = run("“trump greenland talks again today”", "“jury verdict”");
+    expect(steps).toBeLessThan(30);
+  });
+
+  it("commonPrefix", () => {
+    expect(commonPrefix("abc", "abd")).toBe(2);
   });
 });

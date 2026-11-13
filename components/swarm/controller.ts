@@ -20,7 +20,9 @@ import { DEFAULT_LAYOUT, layoutCards, type CardRect } from "@/lib/swarm/layout";
 import {
   bendAmount,
   clamp,
+  commonPrefix,
   dragEase,
+  editStep,
   DT_MAX,
   orbitRectTarget,
   pathPoint,
@@ -31,7 +33,7 @@ import {
   typeDelay,
   type Pt,
 } from "@/lib/swarm/motion";
-import { cardColor, ICONS, IDLE_COLOR, tagInk, type Shape } from "./cursors";
+import { cardColor, ICONS, IDLE_COLOR, tagInk, wanderColor, type Shape } from "./cursors";
 
 export const MAX_CURSORS = 150;
 const RING_POOL = 16;
@@ -86,12 +88,34 @@ interface Cur {
 }
 
 interface Job {
-  kind: "draw" | "type";
+  kind: "draw" | "edit";
   card: Card;
-  /** type: 다음 글자까지 남은 시간 */
+  /** edit: 고치는 칸 */
+  field: FieldKey;
+  /** edit: 다음 타건까지 남은 시간 */
   next: number;
-  i: number;
+  /** edit: 캐럿 글자 위치 */
+  caret: number;
 }
+
+/** 카드에서 글자가 바뀌는 칸 — 바뀌면 커서가 와서 지우고 다시 친다 */
+type FieldKey = "label" | "title" | "meta" | "quote" | "related";
+const FIELD_KEYS: readonly FieldKey[] = ["title", "label", "meta", "quote", "related"];
+
+interface Field {
+  el: HTMLElement;
+  /** 지금 화면에 보이는 글자(편집 중엔 평문) */
+  shown: string;
+  /** 최신 스냅샷이 원하는 글자 */
+  target: string;
+  /** 편집이 끝났을 때의 최종 모양(숫자 span·li 등) */
+  render: () => void;
+  editor: Cur | null;
+  /** 캐럿 위치 — 카드 원점 기준(글자가 바뀔 때만 잰다) */
+  cx: number;
+  cy: number;
+}
+
 
 interface Card {
   id: number;
@@ -100,7 +124,6 @@ interface Card {
   frame: HTMLElement;
   label: HTMLElement;
   title: HTMLElement;
-  titleText: string;
   meta: HTMLElement;
   spark: SVGPolylineElement;
   related: HTMLElement;
@@ -111,8 +134,7 @@ interface Card {
   rect: CardRect | null;
   built: boolean;
   building: boolean;
-  typed: number;
-  typing: boolean;
+  fields: Record<FieldKey, Field>;
   removing: number;
 }
 
@@ -138,7 +160,14 @@ export class SwarmController {
   private readonly viewport: HTMLElement;
   private readonly board: HTMLElement;
   private readonly cardsEl: HTMLElement;
+  /** 커서·링이 그려지는 평면 — 보드 좌표 그대로 쓴다(stage가 있으면 stage 위에서 보드 위치로 옮긴다) */
   private readonly layer: HTMLElement;
+  /** 레이어를 담는 바깥 판 — stage가 있으면 stage 전체(레일 포함)를 덮어 커서가 레일 위에서도 보인다 */
+  private readonly layerHost: HTMLElement;
+  private readonly stage: HTMLElement | null;
+  private offX = 0;
+  private offY = 0;
+  private planeKey = "";
   private readonly cbs: SwarmCallbacks;
   private readonly reduced: boolean;
   private readonly curs: Cur[] = [];
@@ -158,20 +187,24 @@ export class SwarmController {
   private readonly ro: ResizeObserver;
   private readonly onPointer: (e: PointerEvent) => void;
 
-  constructor(viewport: HTMLElement, board: HTMLElement, cbs: SwarmCallbacks, reduced: boolean) {
+  constructor(viewport: HTMLElement, board: HTMLElement, cbs: SwarmCallbacks, reduced: boolean, stage: HTMLElement | null = null) {
     this.viewport = viewport;
     this.board = board;
     this.cbs = cbs;
     this.reduced = reduced;
+    this.stage = stage;
     this.cardsEl = h("div", "sw-cards", board);
-    this.layer = h("div", "sw-layer", board);
-    this.layer.setAttribute("aria-hidden", "true");
+    // 뷰포트는 스크롤 컨테이너라 안쪽 레이어는 레일 쪽에서 잘린다 — stage 위에 따로 띄운다
+    this.layerHost = h("div", stage !== null ? "sw-layer sw-layer-stage" : "sw-layer", stage ?? board);
+    this.layerHost.setAttribute("aria-hidden", "true");
+    this.layer = stage !== null ? h("div", "sw-plane", this.layerHost) : this.layerHost;
     if (!reduced) {
       for (let i = 0; i < MAX_CURSORS; i++) this.curs.push(this.makeCursor());
       for (let i = 0; i < RING_POOL; i++) this.rings.push(h("div", "sw-ring", this.layer));
     }
     this.ro = new ResizeObserver(() => this.measure());
     this.ro.observe(viewport);
+    if (stage !== null) this.ro.observe(stage);
     this.measure();
     // 커서 히트 테스트 — 오버레이는 pointer-events:none이라 보드에서 직접 가장 가까운 커서를 찾는다
     this.onPointer = (e: PointerEvent) => {
@@ -204,6 +237,7 @@ export class SwarmController {
     this.ro.disconnect();
     this.board.removeEventListener("pointerdown", this.onPointer, true);
     this.board.replaceChildren();
+    if (this.stage !== null) this.layerHost.remove();
   }
 
   setPaused(p: boolean): void {
@@ -213,6 +247,21 @@ export class SwarmController {
   private measure(): void {
     this.width = this.viewport.clientWidth;
     this.viewH = this.viewport.clientHeight;
+    if (this.stage !== null) {
+      const s = this.stage.getBoundingClientRect();
+      const v = this.viewport.getBoundingClientRect();
+      this.offX = v.left - s.left;
+      this.offY = v.top - s.top;
+      // 보이는 곳 = 왼쪽 레일 기둥(전체 높이) ∪ 캔버스 뷰포트. 탭·상태줄 위로는 넘치지 않는다
+      const x0 = this.offX;
+      const y0 = this.offY;
+      const x1 = x0 + v.width;
+      const y1 = y0 + v.height;
+      const H = s.height;
+      this.layerHost.style.clipPath =
+        x0 > 1 ? `polygon(0 0, ${x0}px 0, ${x0}px ${y0}px, ${x1}px ${y0}px, ${x1}px ${y1}px, ${x0}px ${y1}px, ${x0}px ${H}px, 0 ${H}px)` : `inset(${y0}px ${s.width - x1}px ${H - y1}px ${x0}px)`;
+      this.planeKey = "";
+    }
     this.relayout();
   }
 
@@ -262,6 +311,7 @@ export class SwarmController {
   }
 
   private release(c: Cur): void {
+    this.endEdit(c);
     c.active = false;
     c.mode = "idle";
     c.job = null;
@@ -293,7 +343,7 @@ export class SwarmController {
     if (o != null) return o;
     const top = this.viewport.scrollTop;
     const left = Math.random() < 0.5;
-    return { x: left ? -40 : this.width + 40, y: top + rand(0.1, 0.9) * this.viewH };
+    return { x: left ? -this.offX - 40 : this.width + 40, y: top + rand(0.1, 0.9) * this.viewH };
   }
 
   private spawnAt(p: Pt): Cur | null {
@@ -328,8 +378,10 @@ export class SwarmController {
   }
 
   private leave(c: Cur): void {
+    this.endEdit(c);
     const right = c.x > this.width / 2;
-    this.travel(c, { x: right ? this.width + 60 : -60, y: c.y + rand(-80, 80) }, 0.7, "idle");
+    // 왼쪽으로 나갈 땐 레일까지 건너 stage 밖으로 — 레일 위에서 멈춰 보이지 않게
+    this.travel(c, { x: right ? this.width + 60 : -this.offX - 60, y: c.y + rand(-80, 80) }, 0.7, "idle");
     c.mode = "leave";
   }
 
@@ -365,7 +417,7 @@ export class SwarmController {
           this.release(c);
           continue;
         }
-        this.setLook(c, IDLE_COLOR, row.tag, "arrow");
+        this.setLook(c, wanderColor(), row.tag, "arrow");
         c.el.dataset.idle = "true";
         c.eventId = null;
         const top = this.viewport.scrollTop;
@@ -495,7 +547,6 @@ export class SwarmController {
       frame,
       label,
       title,
-      titleText: "",
       meta,
       spark,
       related,
@@ -506,10 +557,11 @@ export class SwarmController {
       rect: null,
       built: this.reduced,
       building: false,
-      typed: 0,
-      typing: false,
+      fields: {} as Record<FieldKey, Field>,
       removing: 0,
     };
+    const els: Record<FieldKey, HTMLElement> = { label, title, meta, quote, related };
+    for (const k of FIELD_KEYS) card.fields[k] = { el: els[k], shown: "", target: "", render: () => {}, editor: null, cx: 0, cy: 0 };
     el.dataset.built = String(card.built);
     const open = (): void => this.cbs.onOpenCard?.(card.ev);
     el.addEventListener("click", open);
@@ -530,43 +582,157 @@ export class SwarmController {
     card.el.dataset.life = ev.lifecycle;
     card.el.setAttribute("aria-label", `${ev.title} — ${stateKo(ev)}`);
     card.el.dataset.state = ev.state;
-    card.label.textContent = `${KIND_KO[ev.titleKind] ?? ""} · ${stateKo(ev)}${ev.langs.length > 0 ? ` · ${ev.langs.join("/")}` : ""}`;
-    card.titleText = ev.title;
-    if (card.built && !card.typing) card.title.textContent = ev.title;
-    // 배지 대신 한 줄 문장 — 숫자만 고정폭(Plex Mono엔 한글이 없다)
+    const labelText = `${KIND_KO[ev.titleKind] ?? ""} · ${stateKo(ev)}${ev.langs.length > 0 ? ` · ${ev.langs.join("/")}` : ""}`;
+    this.setField(card, "label", labelText, () => {
+      card.label.textContent = labelText;
+    });
+    const title = ev.title;
+    this.setField(card, "title", title, () => {
+      card.title.textContent = title;
+    });
+    // 배지 대신 한 줄 문장 — 숫자만 고정폭(Plex Mono엔 한글이 없다). 편집 중엔 평문, 끝나면 숫자 span으로
     const mult = ev.stats.mult >= 10 ? Math.round(ev.stats.mult).toString() : ev.stats.mult.toFixed(1);
-    const num = (t: string): HTMLSpanElement => {
-      const s = document.createElement("span");
-      s.className = "sw-num";
-      s.textContent = t;
-      return s;
-    };
     // 증감 문구는 트렌드만 — 관찰 카드는 직전 구간이 비어 가속 값이 뜻이 없다(접속 직후)
     const trend = ev.state !== "active" ? null : ev.lifecycle === "rising" ? " · ↑ 늘어나는 중" : ev.lifecycle === "fading" ? " · ↓ 식는 중" : null;
-    card.meta.replaceChildren(
-      ev.state === "past" ? "최고 평소의 " : "평소의 ",
-      num(mult),
-      "배 · 작성자 ",
-      num(String(ev.stats.u)),
-      "명",
-      ...(ev.stats.isNew && ev.state !== "past" ? [" · 처음 보는 말"] : []),
-      ...(trend !== null ? [trend] : []),
+    // [글자, 숫자인가]
+    const parts: [string, boolean][] = [
+      [ev.state === "past" ? "최고 평소의 " : "평소의 ", false],
+      [mult, true],
+      ["배 · 작성자 ", false],
+      [String(ev.stats.u), true],
+      ["명", false],
+      ...(ev.stats.isNew && ev.state !== "past" ? [[" · 처음 보는 말", false] as [string, boolean]] : []),
+      ...(trend !== null ? [[trend, false] as [string, boolean]] : []),
+    ];
+    this.setField(
+      card,
+      "meta",
+      parts.map((p) => p[0]).join(""),
+      () => {
+        card.meta.replaceChildren(
+          ...parts.map(([t, isNum]) => {
+            if (!isNum) return t;
+            const s = document.createElement("span");
+            s.className = "sw-num";
+            s.textContent = t;
+            return s;
+          }),
+        );
+      },
     );
     const max = Math.max(1, ...ev.spark);
     card.spark.setAttribute(
       "points",
       ev.spark.map((v, i) => `${((i / Math.max(1, ev.spark.length - 1)) * 100).toFixed(1)},${(22 - (v / max) * 20).toFixed(1)}`).join(" "),
     );
-    card.related.replaceChildren(
-      ...ev.related.slice(0, 4).map((r) => {
-        const li = document.createElement("li");
-        li.textContent = r;
-        return li;
-      }),
-    );
+    const rel = ev.related.slice(0, 4);
+    this.setField(card, "related", rel.join("   "), () => {
+      card.related.replaceChildren(
+        ...rel.map((r) => {
+          const li = document.createElement("li");
+          li.textContent = r;
+          return li;
+        }),
+      );
+    });
     card.link.textContent = ev.link?.domain ?? "";
     const q = ev.representativePosts[0]?.text ?? "";
-    card.quote.textContent = q.length > 0 ? `“${q.replace(/\s+/g, " ").trim()}”` : "";
+    const quote = q.length > 0 ? `“${q.replace(/\s+/g, " ").trim()}”` : "";
+    this.setField(card, "quote", quote, () => {
+      card.quote.textContent = quote;
+    });
+  }
+
+  // ── 글자 칸 편집 — 바뀐 글자는 커서가 와서 지우고 다시 친다 ─────────────
+
+  private setField(card: Card, key: FieldKey, target: string, render: () => void): void {
+    const f = card.fields[key];
+    f.target = target;
+    f.render = render;
+    if (f.editor !== null) return; // 편집 중 — 새 목표로 이어서 친다
+    if (f.shown === target) {
+      render();
+      return;
+    }
+    // 그리는 중인 새 카드: 제목은 그리기가 끝나면 타이핑으로, 나머지는 그대로 드러낸다
+    if (!card.built) {
+      if (key !== "title") this.commitField(f);
+      return;
+    }
+    if (this.reduced || this.paused || document.hidden || card.removing > 0 || !this.startEdit(card, key)) this.commitField(f);
+  }
+
+  private commitField(f: Field): void {
+    f.shown = f.target;
+    f.el.dataset.caret = "off";
+    f.render();
+  }
+
+  /** 편집 커서를 붙인다 — 그 카드를 돌던 커서가 있으면 그 커서가, 없으면 레일에서 새로 온다 */
+  private startEdit(card: Card, key: FieldKey): boolean {
+    if (card.rect === null) return false;
+    const f = card.fields[key];
+    const color = cardColor(card.ev);
+    let c = this.curs.find((x) => x.active && x.mode === "orbit" && x.eventId === card.id && x.job === null) ?? null;
+    if (c === null) {
+      c = this.spawnAt(this.edgePoint());
+      if (c === null) return false;
+      c.el.dataset.idle = "false";
+      this.setLook(c, color, card.ev.title.slice(0, 24), "text");
+      c.eventId = card.id;
+    } else {
+      this.setShape(c, "text");
+    }
+    // 카드마다 시차를 둬 판 전체가 한꺼번에 고쳐지지 않게
+    const caret = commonPrefix(f.shown, f.target);
+    c.job = { kind: "edit", card, field: key, next: 0.12 + Math.random() * 0.9, caret };
+    f.editor = c;
+    f.el.textContent = f.shown;
+    f.el.style.setProperty("--caret", color);
+    // 끝에서 치는 경우만 ::after 캐럿 — 가운데를 고칠 땐 I-beam 커서가 캐럿이다
+    f.el.dataset.caret = caret >= f.shown.length ? "on" : "off";
+    this.measureCaret(card, f, caret);
+    this.travel(c, { x: card.rect.x + f.cx, y: card.rect.y + f.cy }, 1.5, "type");
+    return true;
+  }
+
+  /** 편집을 놓는다 — 끝났든 중간이든 칸은 최신 목표 글자로 맞춘다 */
+  private endEdit(c: Cur): void {
+    const job = c.job;
+    if (job?.kind !== "edit") return; // 그리기 작업은 건드리지 않는다
+    c.job = null;
+    const f = job.card.fields[job.field];
+    if (f.editor === c) {
+      f.editor = null;
+      this.commitField(f);
+    }
+  }
+
+  /** 캐럿(글자 위치 idx) 좌표를 카드 원점 기준으로 잰다 — 글자가 바뀔 때만 */
+  private measureCaret(card: Card, f: Field, idx: number): void {
+    const er = card.el.getBoundingClientRect();
+    const fr = f.el.getBoundingClientRect();
+    const node = f.el.firstChild;
+    let x = fr.left;
+    let y = fr.top + Math.min(fr.height, 18) / 2;
+    const len = node !== null && node.nodeType === Node.TEXT_NODE ? (node.textContent ?? "").length : 0;
+    if (node !== null && len > 0) {
+      const range = document.createRange();
+      // 캐럿 앞 글자의 오른쪽 — 맨 앞이면 첫 글자의 왼쪽
+      const at = Math.min(Math.max(idx, 0), len);
+      if (at > 0) range.setStart(node, at - 1);
+      else range.setStart(node, 0);
+      range.setEnd(node, at > 0 ? at : 1);
+      const rects = range.getClientRects();
+      const r = rects[rects.length - 1] ?? range.getBoundingClientRect();
+      x = at > 0 ? r.right + 1 : r.left;
+      y = r.top + r.height / 2;
+    }
+    // 줄 수 제한으로 잘린 줄 아래로 내려가지 않게
+    y = Math.min(y, fr.bottom - 6);
+    x = Math.min(x, fr.right);
+    f.cx = x - er.left;
+    f.cy = y - er.top;
   }
 
   private relayout(): void {
@@ -598,22 +764,24 @@ export class SwarmController {
   private startBuild(card: Card): void {
     if (this.reduced || document.hidden) {
       this.finishBuild(card);
+      this.commitField(card.fields.title);
       return;
     }
     card.building = true;
     card.el.dataset.built = "false";
     card.frame.style.clipPath = "inset(0 100% 100% 0)";
-    card.title.textContent = "";
+    card.title.textContent = card.fields.title.shown;
     const color = cardColor(card.ev);
     const drawer = this.spawnAt(this.edgePoint());
     if (drawer === null) {
       this.finishBuild(card);
+      this.commitField(card.fields.title);
       return;
     }
     drawer.el.dataset.idle = "false";
     this.setLook(drawer, color, card.ev.title.slice(0, 24), "cross");
     drawer.eventId = card.id;
-    drawer.job = { kind: "draw", card, next: 0, i: 0 };
+    drawer.job = { kind: "draw", card, field: "title", next: 0, caret: 0 };
     const r = card.rect as CardRect;
     this.travel(drawer, { x: r.x, y: r.y }, 1.4, "drag");
   }
@@ -624,26 +792,13 @@ export class SwarmController {
     card.el.dataset.built = "true";
     card.frame.style.clipPath = "";
     card.sel.style.display = "none";
-    if (!card.typing) card.title.textContent = card.titleText;
   }
 
+  /** 그리기가 끝난 새 카드 — 다른 커서가 와서 제목을 친다 */
   private startTyping(card: Card): void {
-    const typer = this.spawnAt(this.edgePoint());
-    if (typer === null) {
-      card.title.textContent = card.titleText;
-      return;
-    }
-    card.typing = true;
-    card.typed = 0;
-    card.title.textContent = "";
-    card.title.dataset.caret = "on";
-    card.title.style.setProperty("--caret", cardColor(card.ev));
-    typer.el.dataset.idle = "false";
-    this.setLook(typer, cardColor(card.ev), card.ev.title.slice(0, 24), "text");
-    typer.eventId = card.id;
-    typer.job = { kind: "type", card, next: 0, i: 0 };
-    const r = card.rect as CardRect;
-    this.travel(typer, { x: r.x + 22, y: r.y + 30 }, 1.5, "type");
+    const f = card.fields.title;
+    if (f.editor !== null || f.shown === f.target) return;
+    if (this.reduced || document.hidden || !this.startEdit(card, "title")) this.commitField(f);
   }
 
   // ── 프레임 ──────────────────────────────────────────────────────
@@ -655,6 +810,14 @@ export class SwarmController {
     this.lastNow = now;
     if (this.paused) return;
     this.time += dt;
+
+    if (this.stage !== null) {
+      const key = `${this.offX},${this.offY - this.viewport.scrollTop}`;
+      if (key !== this.planeKey) {
+        this.planeKey = key;
+        this.layer.style.transform = `translate3d(${this.offX}px, ${this.offY - this.viewport.scrollTop}px, 0)`;
+      }
+    }
 
     for (const c of this.curs) {
       if (!c.active) continue;
@@ -771,29 +934,37 @@ export class SwarmController {
       }
       case "type": {
         const job = c.job;
-        if (job === null) {
+        if (job === null || job.kind !== "edit") {
           this.leave(c);
           return;
         }
         const card = job.card;
+        const f = card.fields[job.field];
+        if (card.removing > 0 || card.rect === null || f.editor !== c) {
+          this.leave(c);
+          return;
+        }
         job.next -= dt;
-        while (job.next <= 0 && job.i < card.titleText.length) {
-          job.i++;
-          card.title.textContent = card.titleText.slice(0, job.i);
-          job.next += typeDelay(card.titleText[job.i - 1] ?? "", card.titleText.length, Math.random);
+        let changed = false;
+        // 바뀐 조각만 지우고 다시 친다 — 목표가 도중에 바뀌어도 그 자리에서 이어간다
+        for (let guard = 0; job.next <= 0 && f.shown !== f.target && guard < 40; guard++) {
+          const st = editStep(f.shown, f.target);
+          f.shown = st.text;
+          job.caret = st.caret;
+          job.next += st.typed === null ? 0.03 + Math.random() * 0.03 : typeDelay(st.typed, f.target.length, Math.random);
+          changed = true;
+        }
+        if (changed) {
+          f.el.textContent = f.shown;
+          f.el.dataset.caret = job.caret >= f.shown.length ? "on" : "off";
+          this.measureCaret(card, f, job.caret);
         }
         // I-beam이 캐럿을 따라간다
-        const r = card.rect;
-        if (r !== null) {
-          const w = Math.min(card.title.scrollWidth, r.w - 40);
-          c.x += (r.x + 22 + w - c.x) * Math.min(1, dt * 18);
-          c.y += (r.y + 30 - c.y) * Math.min(1, dt * 18);
-        }
-        if (job.i >= card.titleText.length) {
-          card.typing = false;
-          card.title.dataset.caret = "off";
-          card.title.textContent = card.titleText;
-          c.job = null;
+        const k = Math.min(1, dt * 18);
+        c.x += (card.rect.x + f.cx - c.x) * k;
+        c.y += (card.rect.y + f.cy - c.y) * k;
+        if (f.shown === f.target) {
+          this.endEdit(c);
           this.setShape(c, "arrow");
           this.joinOrbit(c, card);
         }
@@ -824,7 +995,7 @@ export class SwarmController {
       this.joinOrbit(c, job.card);
       return;
     }
-    if (job?.kind === "type") {
+    if (job?.kind === "edit") {
       c.mode = "type";
       return;
     }
