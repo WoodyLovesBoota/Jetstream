@@ -1,0 +1,75 @@
+{
+  "background": "synthetic(1500 posts/min)",
+  "prior": false,
+  "injectAtMin": 20,
+  "detection": [
+    {
+      "perMin": 6,
+      "detected": true,
+      "latencySec": 186
+    },
+    {
+      "perMin": 12,
+      "detected": true,
+      "latencySec": 86
+    },
+    {
+      "perMin": 24,
+      "detected": true,
+      "latencySec": 51
+    },
+    {
+      "perMin": 48,
+      "detected": true,
+      "latencySec": 26
+    }
+  ],
+  "botDetected": false,
+  "top10BackgroundRatio": 0,
+  "eventsPerHour": 10.3,
+  "eventsPerSec": 42081,
+  "repostRing": {
+    "ringSize": 300,
+    "flaggedReposters": 300,
+    "perEvent": {
+      "w:zqxinject48": {
+        "weightedReposters": 60,
+        "r": 0.9
+      },
+      "w:zqxinject24": {
+        "weightedReposters": 60,
+        "r": 0.904
+      },
+      "w:zqxinject12": {
+        "weightedReposters": 60,
+        "r": 1.041
+      }
+    }
+  },
+  "repost": {
+    "r": {
+      "n": 725,
+      "p10": 0.9,
+      "p50": 0.904,
+      "p90": 1.111,
+      "min": 0.9,
+      "max": 1.414
+    },
+    "amp": {
+      "p10": 0.039,
+      "p50": 0.449,
+      "p90": 1.738
+    },
+    "rankChangedFrac": 0.202,
+    "topChangedFrac": 0.1,
+    "rho": {
+      "used": 0.812,
+      "ewma": 0.812,
+      "observed": 5,
+      "warm": true
+    },
+    "ringFlagged": 300,
+    "botBanned": 0,
+    "attributedFrac": 0.929
+  }
+}
