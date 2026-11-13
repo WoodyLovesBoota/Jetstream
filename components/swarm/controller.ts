@@ -2,8 +2,8 @@
 //
 // 데이터 매핑(지시서 8.1)
 //   커서 하나      = Tape 샘플러가 뽑은 post 하나(초당 ~15). 이름 태그 = 그 글의 후보 라벨
-//   커서 색        = 이벤트 색(12색), 무소속은 회색
-//   향하는 곳      = 그 글이 속한 이벤트 카드. 무소속은 배경을 떠돌다 화면 밖으로
+//   커서 색        = 이벤트 색(12색), 지나간 카드는 회색
+//   향하는 곳      = 그 글이 속한 이벤트 카드. 무소속(실제 글이지만 카드 없음)은 흐리게 떠돌다 화면 밖으로
 //   카드 주변 밀도 = 그 이벤트 글의 유입(≈ 고유 작성자) — 공전 시간도 U에 비례
 //   밝게 합류      = newRatio 확률로 새로 합류한 커서에 밝은 링
 //   도착 속도      = 가속 a. 식는 중이면 도착이 줄고 공전 중인 커서가 먼저 떠난다
@@ -37,6 +37,11 @@ import { cardColor, ICONS, IDLE_COLOR, tagInk, wanderColor, type Shape } from ".
 
 export const MAX_CURSORS = 150;
 const RING_POOL = 16;
+/** ↻ 리포스트 도달 링 풀 · 초당 상한 */
+const REACH_POOL = 12;
+const REACH_PER_SEC = 10;
+/** 이 배수 이상이면 카드의 리포스트 도달을 강조한다 */
+const REACH_HOT_AMP = 3;
 const LIFE_KO: Record<string, string> = { rising: "떠오름", peak: "정점", fading: "식는 중" };
 /** 진입 이벤트(active)와 관찰 카드(watch)는 커서가 모이는 살아있는 카드다 */
 const isLive = (ev: TrendEvent): boolean => ev.state !== "past";
@@ -174,6 +179,10 @@ export class SwarmController {
   private readonly cards = new Map<number, Card>();
   private readonly rings: HTMLElement[] = [];
   private ringIdx = 0;
+  private readonly reachRings: HTMLElement[] = [];
+  private reachIdx = 0;
+  /** 최근 1초 안에 띄운 ↻ 링 시각 */
+  private readonly reachTimes: number[] = [];
   private time = 0;
   private lastNow = 0;
   private raf = 0;
@@ -201,6 +210,11 @@ export class SwarmController {
     if (!reduced) {
       for (let i = 0; i < MAX_CURSORS; i++) this.curs.push(this.makeCursor());
       for (let i = 0; i < RING_POOL; i++) this.rings.push(h("div", "sw-ring", this.layer));
+      for (let i = 0; i < REACH_POOL; i++) {
+        const el = h("div", "sw-reach-ring", this.layer);
+        el.textContent = "↻";
+        this.reachRings.push(el);
+      }
     }
     this.ro = new ResizeObserver(() => this.measure());
     this.ro.observe(viewport);
@@ -412,7 +426,8 @@ export class SwarmController {
         const speed = clamp(Math.sqrt(ev.stats.a), 0.7, 1.6);
         this.travel(c, this.orbitPoint(c, card), speed, "orbit");
       } else {
-        // 무소속은 배경 잡음이다 — 일부만, 흐리게 떠돌다 나간다(이벤트 커서가 주인공)
+        // 무소속 글 — 실제 표본 글이지만 아직 어느 카드에도 속하지 않아 갈 곳이 없다.
+        // 일부만, 흐리게 떠돌다 나간다(이벤트 커서가 주인공)
         if (Math.random() > 0.45) {
           this.release(c);
           continue;
@@ -445,7 +460,9 @@ export class SwarmController {
   /** like·repost 핑 → 이벤트 카드 위 클릭 링 */
   pingEngagements(pings: readonly EngagePing[]): void {
     if (this.reduced || this.paused || document.hidden) return;
-    for (const p of pings.slice(0, 6)) {
+    const reach = pings.filter((p) => p.reach === true);
+    if (reach.length > 0) this.pingReach(reach);
+    for (const p of pings.filter((q) => q.reach !== true).slice(0, 6)) {
       if (p.eventId === null) continue;
       const card = this.cards.get(p.eventId);
       if (card === undefined || !card.built || card.rect === null) continue;
@@ -463,6 +480,32 @@ export class SwarmController {
           { transform: `translate3d(${x - 14}px, ${y - 14}px, 0) scale(${p.repost ? 2.2 : 1.6})`, opacity: 0 },
         ],
         { duration: 650, easing: "cubic-bezier(.2,.7,.3,1)" },
+      );
+    }
+  }
+
+  /** 이벤트 멤버 글에 귀속된 리포스트 → 카드 위 작은 ↻ 링(클릭 링과 모양이 다르다). 초당 REACH_PER_SEC개 */
+  private pingReach(pings: readonly EngagePing[]): void {
+    const now = performance.now();
+    while (this.reachTimes.length > 0 && now - this.reachTimes[0] > 1000) this.reachTimes.shift();
+    for (const p of pings) {
+      if (this.reachTimes.length >= REACH_PER_SEC) return;
+      if (p.eventId === null) continue;
+      const card = this.cards.get(p.eventId);
+      if (card === undefined || !card.built || card.rect === null) continue;
+      this.reachTimes.push(now);
+      const r = card.rect;
+      // 카드 위쪽 가장자리를 따라 — 글 영역을 가리지 않게
+      const x = r.x + rand(0.1, 0.9) * r.w;
+      const y = r.y + rand(-0.02, 0.12) * r.h;
+      const el = this.reachRings[this.reachIdx++ % this.reachRings.length];
+      el.style.color = cardColor(card.ev);
+      el.animate(
+        [
+          { transform: `translate3d(${x - 9}px, ${y - 9}px, 0) rotate(0deg) scale(0.6)`, opacity: 0.95 },
+          { transform: `translate3d(${x - 9}px, ${y - 22}px, 0) rotate(300deg) scale(1.1)`, opacity: 0 },
+        ],
+        { duration: 900, easing: "cubic-bezier(.2,.7,.3,1)" },
       );
     }
   }
@@ -604,20 +647,31 @@ export class SwarmController {
       ...(ev.stats.isNew && ev.state !== "past" ? [[" · 처음 보는 말", false] as [string, boolean]] : []),
       ...(trend !== null ? [[trend, false] as [string, boolean]] : []),
     ];
+    // 리포스트 도달 — "↻ 리포스터 n명 · ×amp". 지나간 카드는 뺀다(마지막 값이 지금 값처럼 보인다)
+    const rr = ev.state !== "past" ? ev.repostReach : null;
+    const ampText = rr === null ? "" : rr.amp >= 10 ? Math.round(rr.amp).toString() : rr.amp.toFixed(1);
+    const reachHot = rr !== null && rr.amp >= REACH_HOT_AMP;
     this.setField(
       card,
       "meta",
-      parts.map((p) => p[0]).join(""),
+      parts.map((p) => p[0]).join("") + (rr === null ? "" : `|${rr.reposters}|${ampText}|${reachHot ? 1 : 0}`),
       () => {
-        card.meta.replaceChildren(
-          ...parts.map(([t, isNum]) => {
-            if (!isNum) return t;
-            const s = document.createElement("span");
-            s.className = "sw-num";
-            s.textContent = t;
-            return s;
-          }),
-        );
+        const num = (t: string): HTMLElement => {
+          const s = document.createElement("span");
+          s.className = "sw-num";
+          s.textContent = t;
+          return s;
+        };
+        const nodes: (string | Node)[] = parts.map(([t, isNum]) => (isNum ? num(t) : t));
+        if (rr !== null) {
+          const reach = document.createElement("span");
+          reach.className = "sw-reach";
+          if (reachHot) reach.dataset.hot = "true";
+          reach.title = `평소 기대 리포스터 ${rr.expected.toFixed(0)}명 대비 ${ampText}배`;
+          reach.append("↻ 리포스터 ", num(String(rr.reposters)), "명 · ×", num(ampText));
+          nodes.push(" · ", reach);
+        }
+        card.meta.replaceChildren(...nodes);
       },
     );
     const max = Math.max(1, ...ev.spark);

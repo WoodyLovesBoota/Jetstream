@@ -88,6 +88,20 @@ test("픽스처: 식는 이벤트는 지나간 트렌드로 흐려지고 커서�
   expect(opacity).toBeLessThan(0.6);
 });
 
+test("리포스트 도달 — 카드에 ↻ 리포스터 표시, 크게 퍼지는 #worldcupfinal은 강조, 콘솔 에러 0", async ({ page }) => {
+  const errors = trackErrors(page);
+  await page.goto(URL);
+  await expect(page.locator(".sw-card .sw-reach").first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator(".sw-card .sw-reach").first()).toContainText("↻");
+  // 분당 160 리포스트가 붙는 #worldcupfinal — amp ≥ 3이면 강조
+  await expect(page.locator('.sw-card .sw-reach[data-hot="true"]').first()).toBeVisible({ timeout: 60_000 });
+  // ↻ 링이 실제로 뜬다(웹 애니메이션이 붙은 링)
+  await expect
+    .poll(async () => page.evaluate(() => [...document.querySelectorAll(".sw-reach-ring")].some((el) => el.getAnimations().length > 0)), { timeout: 30_000 })
+    .toBe(true);
+  expect(errors).toEqual([]);
+});
+
 test("카드를 누르면 상세 서랍 — 대표 글·관련·링크", async ({ page }) => {
   await page.goto(URL);
   const jury = page.locator(".sw-card", { has: page.locator(".sw-title", { hasText: "jury verdict" }) });

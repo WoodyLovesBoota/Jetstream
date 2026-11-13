@@ -8,10 +8,11 @@
 //   tick  (5초마다)      S1~S6 → 게이트·점수 → 히스테리시스 → 이벤트 묶기 → 스냅샷
 //   tick  (1분마다)      베이스라인 갱신(5분 지난 분만) → 핫 정리 → 저장 대기열 → 배경어 갱신
 
+import { RepostAmplifier, type Reach } from "./amplification.ts";
 import { biasFactor, ewmaUpdate, expectation, phiFrom, vFromPhi } from "./baseline.ts";
 import { clusterBySets } from "./cluster.ts";
 import { CountMinRing } from "./cms.ts";
-import { alphaFromHalfLife, makeConfig, type TrendConfig } from "./config.ts";
+import { alphaFromHalfLife, makeConfig, type TrendConfig, type TrendConfigInput } from "./config.ts";
 import { AuthorDedup } from "./dedup.ts";
 import { bskyUrl, extractKeys, kindOf, labelOf, postUri, wordStream, type CandidateKind } from "./extract.ts";
 import { hash32, postIdHash } from "./hash.ts";
@@ -23,7 +24,7 @@ import type { SlimEvent } from "./slim.ts";
 import { EngageTopK } from "./spacesaving.ts";
 import type { BaselineRecord } from "./store.ts";
 import { BucketSeries, TrackedTable } from "./tracked.ts";
-import type { EngagePing, SpreadingPost, TrendEvent, TrendMember, TrendPost, TrendSnapshot, TrendStats } from "./types.ts";
+import type { EngagePing, RepostReach, SpreadingPost, TrendEvent, TrendMember, TrendPost, TrendSnapshot, TrendStats } from "./types.ts";
 import { normalizeUrl } from "./url.ts";
 
 /** 이벤트 상세 서랍에 싣는 대표 글 수 */
@@ -67,6 +68,14 @@ function isCopypasta(recent: readonly RecentPost[]): boolean {
 }
 /** 최근 post 본문 LRU — p:/q: 이벤트 제목과 퍼지는 글 본문을 하이드레이션 전에 채운다 */
 const POST_TEXT_CAP = 10_000;
+function reachOut(r: Reach, rSmooth: number): RepostReach {
+  return { reposters: Math.round(r.reposters), posts: r.posts, expected: r.expected, amp: r.amp, r: rSmooth, rRaw: r.r };
+}
+
+/** 저장소에 ρ를 싣는 예약 키 — 후보 키(w:·b:…)와 겹치지 않는다 */
+export const RHO_MEMORY_KEY = "_:rho";
+/** 글 하나가 색인에 싣는 후보 수 */
+const INDEX_CANDS = 4;
 /** 기억 없는 후보가 진입하려면 필요한 실제 관측 분 수 */
 const MIN_HIST = 3;
 
@@ -111,7 +120,7 @@ export interface IngestInfo {
 }
 
 export interface EngineOptions {
-  config?: Partial<TrendConfig>;
+  config?: TrendConfigInput;
   prior?: Prior | null;
   /** 엔진 생성 시각 — 세션 시작 */
   nowMs: number;
@@ -126,6 +135,11 @@ export class TrendEngine {
   private readonly engages: BucketSeries;
   private readonly engage: EngageTopK;
   private readonly dedup: AuthorDedup;
+  /** 리포스트 증폭 계수 R — 순위 전용 */
+  private readonly amp: RepostAmplifier;
+  /** 이벤트(진입·관찰) 멤버 후보 해시 → 이벤트 ID — 리포스트 핑용 */
+  private eventOfHash = new Map<number, number>();
+  private readonly candHashBuf: number[] = [];
   private readonly hot = new Map<string, HotInfo>();
   private readonly hotEngage = new Map<string, HotInfo>();
   private readonly memory = new Map<string, MemEntry>();
@@ -172,6 +186,7 @@ export class TrendEngine {
     this.engages = new BucketSeries(c.buckets);
     this.engage = new EngageTopK(c.engageCap, c.engageLongMin, c.engageEvictFrac);
     this.dedup = new AuthorDedup(c);
+    this.amp = new RepostAmplifier(c.repost, opts.nowMs);
     this.sessionStartMs = opts.nowMs;
     this.sessionStartMin = Math.floor(opts.nowMs / MIN_MS);
     this.lastMinute = this.sessionStartMin;
@@ -200,12 +215,18 @@ export class TrendEngine {
     }
     this.background = new Set(p.background);
     for (const [lang, share] of Object.entries(p.langShare ?? {})) this.langMu.set(lang, { mu: share * scale, n });
+    if (p.rho !== undefined) this.amp.rho.seed(p.rho, n);
   }
 
   /** 저장소에서 읽은 기억을 합친다 — prior보다 새로우면 우선 */
   loadMemory(records: BaselineRecord[]): void {
     for (const r of records) {
       if (!(r.mu >= 0) || !Number.isFinite(r.v) || !(r.n > 0)) continue;
+      if (r.key === RHO_MEMORY_KEY) {
+        // 저장된 ρ는 prior보다 세션 관측이 많을 때만 이긴다
+        if (r.n > this.amp.rho.observed) this.amp.rho.restore(r.mu, r.n);
+        continue;
+      }
       const cur = this.memory.get(r.key);
       if (cur !== undefined && cur.updatedAt >= r.updatedAt) continue;
       this.memory.set(r.key, { mu: r.mu, v: r.v, n: r.n, updatedAt: r.updatedAt });
@@ -346,6 +367,8 @@ export class TrendEngine {
     const didHash = hash32(ev.d);
     if (!this.dedup.admit(didHash, isPost, minute)) return { keys, counted: false };
 
+    if (ev.c === "r" && ev.s !== undefined) this.noteRepost(ev, didHash, minute, nowMs);
+
     let recent: RecentPost | null = null;
     let idHash = 0;
     let links: string[] | null = null;
@@ -402,6 +425,9 @@ export class TrendEngine {
       }
     }
 
+    // 최근 글 색인 — 리포스트를 이 글이 실었던 핫 후보로 귀속하려고. 진입·관찰 이벤트 멤버를 먼저 싣는다
+    if (isPost && ev.k !== undefined) this.amp.notePost(ev.d, ev.k, tMs, this.indexCands(keys));
+
     // 인용·답글 → 대상 글(p:)의 post-ID 집합 — 이벤트 묶기에서 p:끼리·p:와 단어를 잇는다
     if (isPost && (ev.q !== undefined || ev.rp !== undefined)) {
       for (const target of [ev.q, ev.rp]) {
@@ -416,6 +442,30 @@ export class TrendEngine {
       }
     }
     return { keys, counted: true };
+  }
+
+  /** 이 글을 색인에 실을 후보 해시 — 이벤트 멤버 > 핫, 최대 INDEX_CANDS */
+  private indexCands(keys: readonly string[]): number[] {
+    const out = this.candHashBuf;
+    out.length = 0;
+    for (const k of keys) if (out.length < INDEX_CANDS && this.eventOfKey.has(k)) out.push(hash32(k));
+    for (const k of keys) {
+      if (out.length >= INDEX_CANDS) break;
+      if (!this.eventOfKey.has(k) && this.hot.has(k)) out.push(hash32(k));
+    }
+    return out;
+  }
+
+  /** 리포스트 → R 집계(봇·자기 리포스트 제외, 30분 안의 색인된 글만). p: 집계와는 별개다 */
+  private noteRepost(ev: SlimEvent, didHash: number, minute: number, nowMs: number): void {
+    const cands = this.amp.noteRepost({ reposterDid: ev.d, reposterHash: didHash, subjectUri: ev.s as string, minute, nowMs });
+    if (cands === null) return;
+    for (const h of cands) {
+      const id = this.eventOfHash.get(h);
+      if (id === undefined) continue;
+      if (this.pings.length < 512) this.pings.push({ uri: ev.s as string, eventId: id, repost: true, reach: true });
+      break;
+    }
   }
 
   private linksOf(keys: string[]): string[] {
@@ -490,6 +540,7 @@ export class TrendEngine {
     const windowMs = c.windowMin * MIN_MS;
     for (const h of this.hot.values()) h.minuteTick(nowMs, windowMs);
     for (const h of this.hotEngage.values()) h.minuteTick(nowMs, windowMs);
+    this.amp.minuteTick(minute, nowMs);
     // (3) 저장 대기열 — 추적 중인 후보의 현재 μ·v
     const recs: BaselineRecord[] = [];
     for (const slot of this.tracked.slots()) {
@@ -497,6 +548,8 @@ export class TrendEngine {
       if (key === null || this.tracked.obs[slot] <= 0 || isConvergentKind(kindOf(key))) continue;
       recs.push({ key, mu: this.tracked.mu[slot], v: this.tracked.v[slot], n: this.tracked.obs[slot], updatedAt: nowMs });
     }
+    const rho = this.amp.rho.state();
+    if (rho.n > 0) recs.push({ key: RHO_MEMORY_KEY, mu: rho.mu, v: 0, n: rho.n, updatedAt: nowMs });
     this.pendingSave = recs;
     // (4) 배경어 — 첫 1시간은 자주, 이후 매시간
     const every = minute - this.sessionStartMin < 60 ? c.backgroundEarlyEveryMin : c.backgroundEveryMin;
@@ -844,7 +897,12 @@ export class TrendEngine {
       .map((keys) => keys.sort((x, y) => (evals.get(y)?.res.score ?? 0) - (evals.get(x)?.res.score ?? 0)))
       .sort((x, y) => (evals.get(y[0])?.res.score ?? 0) - (evals.get(x[0])?.res.score ?? 0));
 
-    for (const keys of comps) {
+    // 리포스트 도달 — 이벤트 멤버 리포스터 합집합. 링 감지는 진입 이벤트끼리만
+    const unions = comps.map((keys) => this.amp.union(this.memberHashes(keys), minute));
+    this.amp.detectRings(unions, minute);
+
+    for (let ci = 0; ci < comps.length; ci++) {
+      const keys = comps[ci];
       // ID 승계: 점수 높은 멤버부터 직전 이벤트 ID를 찾는다
       let id = -1;
       for (const k of keys) {
@@ -858,6 +916,11 @@ export class TrendEngine {
       usedIds.add(id);
       const prevCard = this.events.get(id);
       const card = this.makeCard(id, keys, activeSet, evals, nowMs, bNow, minute, prevCard);
+      // R은 순위(rankScore)에만 — 진입·퇴출·생애주기는 위 score와 멤버 신호로 이미 정해졌다
+      const reach = this.amp.reach(unions[ci], this.eventPosts(keys, evals, nowMs), minute, nowMs);
+      const rSmooth = this.amp.smooth(id, reach.r);
+      card.repostReach = reachOut(reach, rSmooth);
+      card.rankScore = card.score * rSmooth;
       for (const k of keys) if (activeSet.has(k)) nextOf.set(k, id);
       this.events.set(id, card);
       built.push(card);
@@ -881,13 +944,47 @@ export class TrendEngine {
       if (card.exitedAt !== null && nowMs - card.exitedAt > c.pastKeepMin * MIN_MS) this.events.delete(id);
     }
 
-    const active = built.sort((x, y) => y.score - x.score).slice(0, c.maxEvents);
+    const active = built.sort((x, y) => y.rankScore - x.rankScore || y.score - x.score).slice(0, c.maxEvents);
     const watch = this.buildWatch(watchPool, evals, nextOf, usedIds, active, nowMs, bNow, minute, win);
+    // 관찰 카드도 표시용 도달은 보여 준다(순위에는 안 쓴다 — 관찰 카드 순서는 z순)
+    for (const w of watch) {
+      const reach = this.amp.reach(this.amp.union(this.memberHashes([w.titleKey]), minute), this.eventPosts([w.titleKey], evals, nowMs), minute, nowMs);
+      w.repostReach = reachOut(reach, reach.r);
+    }
+    this.amp.retain(new Set(active.map((e) => e.id)));
+    this.eventOfHash = new Map();
+    for (const [k, id] of nextOf) this.eventOfHash.set(hash32(k), id);
     const past = [...this.events.values()]
       .filter((e) => e.state === "past")
       .sort((x, y) => (y.exitedAt ?? 0) - (x.exitedAt ?? 0))
       .slice(0, Math.max(0, c.maxEvents - active.length - watch.length));
     return this.paint([...active, ...watch, ...past]);
+  }
+
+  /** R 집계 대상 멤버 해시 — p:(글 자체)는 색인 후보가 아니므로 뺀다 */
+  private memberHashes(keys: readonly string[]): number[] {
+    const out: number[] = [];
+    for (const k of keys) if (!k.startsWith("p:")) out.push(hash32(k));
+    return out;
+  }
+
+  /**
+   * P_e — 5분 이벤트 post 수. 멤버 핫 기록의 post-ID 합집합(멤버 간 중복은 한 번)과
+   * 멤버별 작성자 중복 제거 언급 수 x의 최댓값 중 큰 쪽. post-ID 기록은 후보당 500개 상한이라
+   * 큰 사건에서는 x가 더 정확하다.
+   */
+  private eventPosts(keys: readonly string[], evals: Map<string, Eval>, nowMs: number): number {
+    const ids = new Set<number>();
+    let maxX = 0;
+    const from = nowMs - this.cfg.windowMin * MIN_MS;
+    for (const k of keys) {
+      if (k.startsWith("p:")) continue;
+      maxX = Math.max(maxX, evals.get(k)?.x ?? 0);
+      const set = this.hot.get(k)?.postIds;
+      if (set === undefined) continue;
+      for (const [id, t] of set) if (t >= from) ids.add(id);
+    }
+    return Math.max(ids.size, maxX);
   }
 
   /**
@@ -1209,6 +1306,8 @@ export class TrendEngine {
       enteredAt: prev?.enteredAt ?? st?.enteredAt ?? nowMs,
       exitedAt: null,
       postUri: pUri,
+      repostReach: prev?.repostReach ?? null,
+      rankScore: top?.res.score ?? 0,
     };
   }
 
@@ -1247,11 +1346,13 @@ export class TrendEngine {
         hotBytes +
         this.memory.size * 90 +
         d.pairsThisMinute * 24 +
-        this.cand.size * 80,
+        this.cand.size * 80 +
+        this.amp.stats(this.lastScoreMs).approxBytes,
       scoreMs: this.scoreMs,
       evaluated: this.evaluated,
       passed: this.passed,
       active: [...this.cand.values()].filter((s) => s.state === "active").length,
+      repost: this.amp.stats(this.lastScoreMs),
     };
   }
 
@@ -1304,6 +1405,11 @@ export class TrendEngine {
 
   backgroundWords(): string[] {
     return [...this.background];
+  }
+
+  /** 지금 E_e에 쓰는 ρ와 EWMA 값 — prior 빌드·리플레이 리포트용 */
+  rhoInfo(nowMs: number): { used: number; ewma: number; observed: number; warm: boolean } {
+    return { used: this.amp.rhoFor(nowMs), ewma: this.amp.rho.value(), observed: this.amp.rho.observed, warm: this.amp.warm(nowMs) };
   }
 
   /** 언어별 평소 post 점유율(bias 보정 후) — prior의 langShare */

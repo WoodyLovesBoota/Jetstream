@@ -6,6 +6,8 @@
 // 주입(모두 --at 분 시점부터):
 //   · 단어 주입 4종 — 분당 6/12/24/48건, 서로 다른 작성자 수천 명 풀 (처음 보는 가상 단어)
 //   · 봇 패턴 — 6계정이 5분간 400건 같은 해시태그
+//   · 리포스트 링 — 같은 300명이 분당 12·24·48건 주입 단어의 글 3개 이벤트를 번갈아 리포스트
+//     (--at+3분부터, 탐지 뒤). 링 가중치(0.2)가 적용되는지 본다. R은 판정에 안 쓰이므로 탐지 지연과 무관하다
 // 지표: 각 주입 단어의 첫 진입까지 걸린 시간(목표 2분 이내), 봇 해시태그 미탐지, 상위 10 배경어 비율.
 
 import { writeFileSync } from "node:fs";
@@ -22,6 +24,8 @@ function arg(name: string, fallback: string | null = null): string | null {
 const MIN = 60_000;
 const RATES = [6, 12, 24, 48];
 const word = (r: number): string => `zqxinject${r}`;
+/** 리포스트 링 크기 */
+const RING = 300;
 
 /** 시간 순서인 두 비동기 열을 병합 */
 async function* merge(a: AsyncIterable<SlimEvent>, b: Iterable<SlimEvent>): AsyncGenerator<SlimEvent> {
@@ -91,13 +95,16 @@ async function main(): Promise<void> {
       perMin: r,
       authors: 5000,
       authorPrefix: `inj${r}x`,
+      reposts: r >= 12 ? { perMin: 300, reposters: RING, prefix: "ringx", roundRobin: true, startMs: injectAt + 3 * MIN } : undefined,
     })),
     bots: [{ accounts: 6, posts: 400, startMs: injectAt, endMs: injectAt + 5 * MIN, text: "#zqxbotcoin buy now", hashtags: ["zqxbotcoin"] }],
   };
   const injected = [...synthStream(opts)];
 
   const firstActive = new Map<string, number>();
-  const { report } = await replay(merge(background, injected), {
+  /** 링 이벤트별 마지막 도달(가중 후) */
+  const ringReach = new Map<number, { weighted: number; r: number }>();
+  const { report, engine: eng } = await replay(merge(background, injected), {
     prior,
     untilMs: t0 + minutes * MIN,
     measureFromMs: t0 + 10 * MIN,
@@ -105,6 +112,12 @@ async function main(): Promise<void> {
       for (const r of RATES) {
         const k = `w:${word(r)}`;
         if (!firstActive.has(k) && engine.stateOf(k) === "active") firstActive.set(k, s.ts);
+      }
+      for (const e of s.events) {
+        if (e.state !== "active" || e.repostReach === null) continue;
+        const rr = RATES.find((r) => r >= 12 && e.members.some((m) => m.key === `w:${word(r)}`));
+        if (rr === undefined) continue;
+        ringReach.set(rr, { weighted: e.repostReach.reposters, r: Number(e.repostReach.r.toFixed(3)) });
       }
       for (const k of ["h:zqxbotcoin", "w:zqxbotcoin"]) {
         if (!firstActive.has(k) && engine.stateOf(k) === "active") firstActive.set(k, s.ts);
@@ -125,6 +138,13 @@ async function main(): Promise<void> {
     top10BackgroundRatio: report.top10BackgroundRatio,
     eventsPerHour: report.eventsPerHour,
     eventsPerSec: report.eventsPerSec,
+    repostRing: {
+      ringSize: RING,
+      flaggedReposters: eng?.stats().repost.ringFlagged ?? 0,
+      // 가중 리포스터 — 링 300명 전원이 0.2로 세이면 이벤트마다 ≈60명
+      perEvent: Object.fromEntries([...ringReach.entries()].map(([r, v]) => [`w:${word(r)}`, { weightedReposters: v.weighted, r: v.r }])),
+    },
+    repost: report.repost,
   };
   const outPath = arg("out");
   if (outPath !== null) writeFileSync(outPath, JSON.stringify(result, null, 2));

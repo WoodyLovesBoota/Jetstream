@@ -129,6 +129,36 @@ export interface TrendConfig {
   watchMinAuthors: number;
   /** 관찰 카드 최대 한 작성자 점유율 */
   watchTopShareMax: number;
+
+  // ── 리포스트 증폭 계수 R(순위 전용 — 게이트·진입·퇴출에는 쓰지 않는다) ──
+  repost: RepostConfig;
+}
+
+export interface RepostConfig {
+  /** 증폭 민감도 β — R = 1 + β·ln(amp) */
+  beta: number;
+  /** R 하한 / 상한 */
+  rMin: number;
+  rMax: number;
+  /** prior가 없고 아직 측정값도 없을 때의 ρ(색인된 최근 글에 붙은 리포스트 / post) */
+  rhoInit: number;
+  /** ρ EWMA 반감기(분) */
+  rhoHalfLifeMin: number;
+  /** DID별 분당 리포스트가 이 수를 넘기면 리포스트 봇 */
+  botPerMin: number;
+  botBanMin: number;
+  /** 후보별 5분 리포스터 집합 상한 */
+  reposterCap: number;
+  /** 최근 글 색인 TTL(분) · 상한 */
+  postIndexTtlMin: number;
+  postIndexMax: number;
+  /** 링 감지 — 두 이벤트 리포스터 겹침 계수 문턱, 양쪽 최소 크기, 의심 가중치, 표시 유지(분) */
+  ringOverlap: number;
+  ringMinSize: number;
+  ringWeight: number;
+  ringFlagMin: number;
+  /** R 표시 평활 계수 */
+  smoothing: number;
 }
 
 export const DEFAULT_CONFIG: TrendConfig = {
@@ -212,11 +242,32 @@ export const DEFAULT_CONFIG: TrendConfig = {
   watchHoldMs: 60_000,
   watchMinAuthors: 3,
   watchTopShareMax: 0.34,
+
+  repost: {
+    beta: 0.2,
+    rMin: 0.9,
+    rMax: 1.5,
+    rhoInit: 0.4,
+    rhoHalfLifeMin: 360,
+    botPerMin: 30,
+    botBanMin: 10,
+    reposterCap: 4_000,
+    postIndexTtlMin: 30,
+    postIndexMax: 100_000,
+    ringOverlap: 0.6,
+    ringMinSize: 200,
+    ringWeight: 0.2,
+    ringFlagMin: 15,
+    smoothing: 0.3,
+  },
 };
 
-export function makeConfig(over?: Partial<TrendConfig>): TrendConfig {
-  return { ...DEFAULT_CONFIG, ...over };
+/** 부분 설정을 기본값에 합친다. repost는 한 단계 더 합친다(일부 필드만 바꿔도 나머지는 기본값) */
+export function makeConfig(over?: Partial<Omit<TrendConfig, "repost">> & { repost?: Partial<RepostConfig> }): TrendConfig {
+  return { ...DEFAULT_CONFIG, ...over, repost: { ...DEFAULT_CONFIG.repost, ...over?.repost } };
 }
+
+export type TrendConfigInput = Parameters<typeof makeConfig>[0];
 
 /** 반감기(분) → 분당 EWMA 계수 α */
 export function alphaFromHalfLife(halfLifeMin: number): number {

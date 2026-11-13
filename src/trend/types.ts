@@ -1,5 +1,6 @@
 // 엔진 → 메인 스레드 스냅샷 타입. structured clone 가능한 plain 값만.
 
+import type { AmpStats } from "./amplification.ts";
 import type { CandidateKind } from "./extract.ts";
 import type { Lifecycle } from "./signals.ts";
 
@@ -58,6 +59,25 @@ export interface TrendEvent {
   exitedAt: number | null;
   /** 제목 멤버가 글(p:/q:)이면 그 at:// URI — UI가 본문을 채운다 */
   postUri: string | null;
+  /** 리포스트 도달 — 이벤트 글들이 평소보다 얼마나 퍼 날라지는가. 계산 전이면 null */
+  repostReach: RepostReach | null;
+  /** 정렬 점수 = score × 평활 R. 진입·퇴출은 score로만 판정한다 */
+  rankScore: number;
+}
+
+export interface RepostReach {
+  /** 5분 고유 리포스터(봇·자기 리포스트 제외, 링 의심은 0.2명으로) */
+  reposters: number;
+  /** P_e — 5분 이벤트 post 수 */
+  posts: number;
+  /** E_e = ρ × P_e */
+  expected: number;
+  /** (Rp+1)/(E+1) */
+  amp: number;
+  /** 정렬에 쓰는 평활 R */
+  r: number;
+  /** 이번 패스 R(평활 전) */
+  rRaw: number;
 }
 
 export interface SpreadingPost {
@@ -97,6 +117,8 @@ export interface TrendStats {
   evaluated: number;
   passed: number;
   active: number;
+  /** 리포스트 증폭(R) 집계 상태 */
+  repost: AmpStats;
 }
 
 export interface TrendSnapshot {
@@ -112,4 +134,6 @@ export interface EngagePing {
   uri: string;
   eventId: number | null;
   repost: boolean;
+  /** 이벤트 멤버 글에 귀속된 리포스트(R 집계) — UI는 ↻ 링으로 따로 그린다 */
+  reach?: boolean;
 }

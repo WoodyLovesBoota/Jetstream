@@ -20,6 +20,8 @@ export interface Prior {
   entries: Map<string, PriorEntry>;
   /** 언어별 평소 post 점유율 — 언어 믹스 보정의 초기값 */
   langShare?: Record<string, number>;
+  /** 리포스트 증폭 ρ — 색인된(30분 안) 글에 붙은 필터 통과 리포스트 / post */
+  rho?: number;
 }
 
 export interface PriorFile {
@@ -30,6 +32,7 @@ export interface PriorFile {
   background: string[];
   c: Record<string, [number, number] | [number, number, number[]]>;
   langShare?: Record<string, number>;
+  rho?: number;
 }
 
 function num(x: unknown): number | null {
@@ -61,8 +64,10 @@ export function parsePrior(json: unknown): Prior | null {
     langShare = {};
     for (const [l, v] of Object.entries(f.langShare)) if (num(v) !== null && v >= 0) langShare[l] = v;
   }
+  const rho = num(f.rho);
   return {
     langShare,
+    rho: rho !== null && rho >= 0 ? rho : undefined,
     createdAt: typeof f.createdAt === "string" ? f.createdAt : "",
     sourceMinutes: num(f.sourceMinutes) ?? 0,
     postsPerMinute: ppm,
@@ -90,6 +95,7 @@ export function serializePrior(p: Prior): PriorFile {
     out.langShare = {};
     for (const [l, v] of Object.entries(p.langShare)) out.langShare[l] = sig(v);
   }
+  if (p.rho !== undefined) out.rho = sig(p.rho);
   return out;
 }
 

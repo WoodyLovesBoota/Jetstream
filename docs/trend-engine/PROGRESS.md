@@ -78,3 +78,28 @@
 - 정리: README·verify 스킬·설계 문서 머리말, FINAL_REPORT.md.
 - 최종 게이트: typecheck 0 / lint 0 error(기존 경고 1) / unit 117 / build OK / e2e 9.
 - push 실패(GitHub 인증 없음, gh 없음) — FINAL_REPORT 8장에 사람이 할 명령을 남김.
+
+## 추가 작업 — 리포스트 증폭 계수 R (브랜치 `feat/trend-repost-amp`, base `main` @ 74d1d77)
+
+지시서의 설계상 파일명 → 실제 반영 위치:
+
+| 지시서 | 실제 |
+|---|---|
+| `src/trend/config.ts` | 같은 파일 — `repost` 묶음(`RepostConfig`), `makeConfig`가 한 단계 더 합친다 |
+| `src/trend/extract.ts`(리포스트 파싱) | 파싱은 이미 `slim.ts`가 한다(`c:"r"`, `s`=대상 URI). DID·rkey 분해는 `postIndex.ts`의 `parsePostUri` |
+| `src/trend/authors.ts`(봇 필터) | 기존 `dedup.ts`는 그대로 두고 `amplification.ts`의 `RepostBotFilter`로 분리. post 봇·참여 봇(dedup) 뮤트 DID는 엔진 `admit` 단계에서 이미 빠진다 |
+| `src/trend/postIndex.ts`(신규) | 같은 이름 — typed array 원형 버퍼 + Map, 52비트 post 키 |
+| `src/trend/amplification.ts`(신규) | 같은 이름 — `computeR`·`RhoEstimator`·`RingDetector`·`RepostAmplifier` |
+| `src/trend/events.ts`(이벤트 묶기) | `engine.ts`의 `buildEvents`(P_e·Rp_e·링 감지·평활·`rankScore` 정렬) |
+| `baseline.ts`/저장소 | ρ는 저장소에 예약 키 `_:rho`(BaselineRecord)로 저장·복원, prior는 `prior.ts`의 `rho` 필드 |
+| `scripts/build-prior.ts` · `scripts/replay.ts` | 같은 파일 + `src/trend/harness.ts`(R 분포·순위 변경 비율) · `scripts/inject.ts`(리포스트 링 주입) |
+| `stream.worker.ts` + 공유 타입 | 스냅샷 타입은 `src/trend/types.ts`(`TrendEvent.repostReach`·`rankScore`, `EngagePing.reach`) — 워커는 엔진 스냅샷을 그대로 실어 보내므로 코드 변경 없음 |
+| 이벤트 카드 UI + 스웜 | `components/swarm/controller.ts`(카드 문장 `↻ 리포스터 n명 · ×amp`, amp≥3 강조, ↻ 링 초당 10개), `app/swarm.css` |
+| 합성 스트림 | `src/trend/synth.ts` 주제별 `reposts`(풀·접두어·라운드로빈), 픽스처 `#WorldCupFinal`·`jury verdict`에 리포스트 |
+
+### R1 — 엔진·테스트 ✅
+- 단위 `amplification.test.ts` 17건(computeR·자기 리포스트·같은 리포스터 1명·봇 31건 금지/복귀·색인 만료/상한·30분 지난 글·링 0.2/미적용·ρ EWMA·워밍업).
+- 시나리오(scenarios.test.ts) 8건: (A) 지시서 표 4건 + (B) 엔진 통합 4건 — 퍼지는 사건 R>1.3·잡담 하한 근처·**리포스트 유무와 무관하게 단어 진입 시각이 완전히 같음**, 봇 링 제외, 게이트 불변(U=6 + 리포스터 1,000 미진입), 자기 리포스트 불변.
+- 합성 주입: 리포스트 링(같은 300명이 3개 이벤트) → 300명 전원 링 의심, 이벤트당 가중 리포스터 300→60. 탐지 지연 불변.
+- e2e: `리포스트 도달` 1건 추가(↻ 표시·강조·링 애니메이션·콘솔 에러 0) — 통과.
+- e2e 기존 6건 실패는 **이 작업 이전부터**다: `main`의 `modify design` 커밋이 관찰 카드(최대 8장)·탭 이름을 바꿨는데 e2e는 "카드 3개"·옛 탭 이름 기준. 변경을 stash한 깨끗한 main에서도 같은 테스트가 같은 이유(카드 10~11개)로 실패함을 확인했다. 문구 영어화 작업에서 같이 고친다.

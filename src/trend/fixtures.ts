@@ -64,6 +64,8 @@ export const FIXTURES: Record<string, FixtureScenario> = {
             perMin: 14,
             authors: 8000,
             authorPrefix: "jury",
+            // 보통 수준으로 퍼 날라지는 뉴스
+            reposts: { perMin: 6, reposters: 4000, prefix: "juryrp" },
             links: ["https://apnews.com/article/jury-verdict-trial-2026?utm_source=bsky"],
           },
           // 상시어의 짝
@@ -94,6 +96,8 @@ export const FIXTURES: Record<string, FixtureScenario> = {
             authors: 9000,
             authorPrefix: "wc",
             hashtags: ["WorldCupFinal"],
+            // 크게 퍼 날라지는 사건 — 카드에 ↻ 강조와 리포스트 링이 보인다
+            reposts: { perMin: 160, reposters: 20_000, prefix: "wcrp" },
           },
           {
             text: (_i, r) => `東京 地震 ${["揺れ", "速報", "大丈夫", "震度"][Math.floor(r() * 4)]}`,

@@ -49,6 +49,19 @@ export interface SynthTopic {
   quote?: string;
   /** 이 주제 글에 붙는 분당 like 수(대상 = 주제 첫 글) */
   likesPerMin?: number;
+  /** 이 주제의 최근 글(최대 50개)을 향한 리포스트 */
+  reposts?: SynthReposts;
+}
+
+export interface SynthReposts {
+  perMin: number;
+  /** 리포스터 풀 크기와 DID 접두어 — 같은 접두어를 여러 주제에 주면 같은 무리(링)다 */
+  reposters: number;
+  prefix: string;
+  /** 리포스터를 풀에서 순서대로 돌린다(기본은 무작위) — 링 주입에서 전원이 고르게 참여하도록 */
+  roundRobin?: boolean;
+  /** 리포스트를 시작할 시각(기본: 주제 시작) */
+  startMs?: number;
 }
 
 export interface SynthBot {
@@ -94,6 +107,9 @@ export function* synthStream(o: SynthOptions): Generator<SlimEvent> {
   const topicCount = (o.topics ?? []).map(() => 0);
   const topicFirstUri: (string | null)[] = (o.topics ?? []).map(() => null);
   const likeCarry = (o.topics ?? []).map(() => 0);
+  const repostCarry = (o.topics ?? []).map(() => 0);
+  const repostSeq = (o.topics ?? []).map(() => 0);
+  const topicRecent: string[][] = (o.topics ?? []).map(() => []);
   let bgCarry = 0;
   let likeBgCarry = 0;
   let seq = 0;
@@ -139,7 +155,20 @@ export function* synthStream(o: SynthOptions): Generator<SlimEvent> {
         if (tp.hashtags !== undefined) ev.h = tp.hashtags;
         if (tp.quote !== undefined) ev.q = tp.quote;
         batch.push(ev);
-        if (topicFirstUri[i] === null) topicFirstUri[i] = `at://${did}/app.bsky.feed.post/${rkey}`;
+        const uri = `at://${did}/app.bsky.feed.post/${rkey}`;
+        if (topicFirstUri[i] === null) topicFirstUri[i] = uri;
+        topicRecent[i].push(uri);
+        if (topicRecent[i].length > 50) topicRecent[i].shift();
+      }
+      const rp = tp.reposts;
+      if (rp !== undefined && sec >= (rp.startMs ?? tp.startMs) && topicRecent[i].length > 0) {
+        repostCarry[i] += rp.perMin / 60;
+        while (repostCarry[i] >= 1) {
+          repostCarry[i]--;
+          const who = rp.roundRobin === true ? repostSeq[i]++ % rp.reposters : Math.floor(r() * rp.reposters);
+          const s = topicRecent[i][Math.floor(r() * topicRecent[i].length)];
+          batch.push({ t: at(), d: `did:plc:${rp.prefix}${who}`, c: "r", s });
+        }
       }
       const target = topicFirstUri[i];
       if (tp.likesPerMin !== undefined && target !== null) {

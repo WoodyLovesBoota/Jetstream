@@ -6,9 +6,11 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "./config.ts";
 import { TrendEngine } from "./engine.ts";
 import type { Prior } from "./prior.ts";
+import { computeR } from "./amplification.ts";
 import { accelRatio, evaluate, liftOf, zScore } from "./signals.ts";
-import { synthStream, type SynthOptions } from "./synth.ts";
-import type { TrendSnapshot } from "./types.ts";
+import type { SlimEvent } from "./slim.ts";
+import { synthStream, type SynthOptions, type SynthTopic } from "./synth.ts";
+import type { TrendEvent, TrendSnapshot } from "./types.ts";
 
 const cfg = DEFAULT_CONFIG;
 
@@ -94,7 +96,13 @@ interface RunResult {
   lifecycleLog: Map<string, { t: number; life: string }[]>;
 }
 
-function run(opts: SynthOptions, engineOpts: { prior?: Prior | null } = {}, watch: string[] = []): RunResult {
+function run(
+  opts: SynthOptions,
+  engineOpts: { prior?: Prior | null } = {},
+  watch: string[] = [],
+  /** 합성 이벤트마다 덧붙일 이벤트(자기 리포스트 주입 등) */
+  extra?: (ev: SlimEvent) => SlimEvent[],
+): RunResult {
   const engine = new TrendEngine({ nowMs: opts.startMs, prior: engineOpts.prior ?? null });
   const snaps: TrendSnapshot[] = [];
   const firstActive = new Map<string, number>();
@@ -118,13 +126,15 @@ function run(opts: SynthOptions, engineOpts: { prior?: Prior | null } = {}, watc
       }
     }
   };
-  for (const ev of synthStream(opts)) {
-    const t = ev.t / 1000;
-    while (nextTick <= t) {
-      onTick(nextTick);
-      nextTick += 1000;
+  for (const ev0 of synthStream(opts)) {
+    for (const ev of [ev0, ...(extra?.(ev0) ?? [])]) {
+      const t = ev.t / 1000;
+      while (nextTick <= t) {
+        onTick(nextTick);
+        nextTick += 1000;
+      }
+      engine.ingest(ev, t);
     }
-    engine.ingest(ev, t);
   }
   while (nextTick <= opts.endMs) {
     onTick(nextTick);
@@ -288,4 +298,108 @@ describe("7.1 (B) 엔진 통합 시뮬레이션", () => {
     expect(peak).toBeGreaterThan(rising);
     expect(fading).toBeGreaterThan(peak);
   }, 60_000);
+});
+
+// ── 리포스트 증폭 계수 R (추가 작업 6.2) ─────────────────────────────
+
+describe("R (A) 계산식 — 지시서 표 (ρ = 0.4)", () => {
+  const rc = DEFAULT_CONFIG.repost;
+
+  it("퍼 날라지는 사건: P=60, 리포스터 240 → E=24, amp≈9.6, R≈1.45", () => {
+    const r = computeR(240, 60, 0.4, rc);
+    expect(r.expected).toBeCloseTo(24, 6);
+    expect(r.amp).toBeCloseTo(9.64, 2);
+    expect(r.r).toBeCloseTo(1.45, 2);
+  });
+
+  it("보통 사건: P=60, 리포스터 24 → amp=1, R=1.0", () => {
+    const r = computeR(24, 60, 0.4, rc);
+    expect(r.amp).toBeCloseTo(1, 6);
+    expect(r.r).toBeCloseTo(1, 6);
+  });
+
+  it("리포스트 없는 잡담: P=60, 리포스터 0 → amp≈0.04, R=0.9(하한)", () => {
+    const r = computeR(0, 60, 0.4, rc);
+    expect(r.amp).toBeCloseTo(0.04, 3);
+    expect(r.r).toBe(0.9);
+  });
+
+  it("순위 역전: 점수 20·R 1.45(=29) > 점수 25·R 0.9(=22.5)", () => {
+    const a = 20 * computeR(240, 60, 0.4, rc).r;
+    const b = 25 * computeR(0, 60, 0.4, rc).r;
+    expect(a).toBeCloseTo(29, 0);
+    expect(b).toBeCloseTo(22.5, 6);
+    expect(a).toBeGreaterThan(b);
+  });
+});
+
+describe("R (B) 엔진 통합", () => {
+  const S = T0 + 15 * MIN;
+  const E = T0 + 25 * MIN;
+  const meme = (over: Partial<SynthTopic> = {}): SynthTopic => ({ text: "skibidoodle", startMs: S, endMs: E, perMin: 25, authors: 3000, authorPrefix: "meme", ...over });
+  const chat = (over: Partial<SynthTopic> = {}): SynthTopic => ({ text: "glorpfest", startMs: S, endMs: E, perMin: 25, authors: 3000, authorPrefix: "chat", ...over });
+
+  function cardOf(r: RunResult, key: string): TrendEvent | undefined {
+    return r.snaps.at(-1)?.events.find((e) => e.state === "active" && e.members.some((m) => m.key === key));
+  }
+
+  function firstActiveNonP(r: RunResult): [string, number][] {
+    return [...r.firstActive.entries()].filter(([k]) => !k.startsWith("p:")).sort((x, y) => x[0].localeCompare(y[0]));
+  }
+
+  it("퍼 날라지는 사건은 R>1.3, 리포스트 없는 잡담은 하한 근처 — 순위만 바뀌고 진입 시각은 같다", () => {
+    const opts = base({
+      endMs: E,
+      topics: [meme({ reposts: { perMin: 120, reposters: 5000, prefix: "fan" } }), chat()],
+    });
+    const r = run(opts);
+    const spread = cardOf(r, "w:skibidoodle");
+    const quiet = cardOf(r, "w:glorpfest");
+    expect(spread?.repostReach).not.toBeNull();
+    expect(spread?.repostReach?.amp ?? 0).toBeGreaterThan(3);
+    expect(spread?.repostReach?.r ?? 0).toBeGreaterThan(1.3);
+    expect(quiet?.repostReach?.r ?? 2).toBeLessThan(0.95);
+    expect(spread?.rankScore).toBeCloseTo((spread?.score ?? 0) * (spread?.repostReach?.r ?? 0), 6);
+    // 정렬은 rankScore 순
+    const act = (r.snaps.at(-1)?.events ?? []).filter((e) => e.state === "active");
+    for (let i = 1; i < act.length; i++) expect(act[i - 1].rankScore).toBeGreaterThanOrEqual(act[i].rankScore);
+    // 대조: 리포스트를 뺀 같은 스트림 — 단어 후보의 진입 시각이 완전히 같다(R은 판정에 안 쓰인다)
+    const base0 = run(base({ endMs: E, topics: [meme(), chat()] }));
+    expect(firstActiveNonP(r)).toEqual(firstActiveNonP(base0));
+  }, 30_000);
+
+  it("리포스트 봇 링: 30계정이 분당 40건씩 → 봇 필터로 제외, 리포스트 없는 경우와 같은 R", () => {
+    const bots = run(base({ endMs: E, topics: [meme({ reposts: { perMin: 1200, reposters: 30, prefix: "rbot", roundRobin: true } })] }));
+    const none = run(base({ endMs: E, topics: [meme()] }));
+    const b = cardOf(bots, "w:skibidoodle")?.repostReach;
+    const n = cardOf(none, "w:skibidoodle")?.repostReach;
+    expect(b).toBeDefined();
+    expect(b?.reposters).toBe(0);
+    expect(b?.r ?? 0).toBeCloseTo(n?.r ?? -1, 1);
+    expect(bots.engine.stats().repost.botBanned).toBeGreaterThanOrEqual(30);
+  }, 30_000);
+
+  it("게이트 불변: U=6인 후보의 글에 리포스터 1,000명이어도 미진입", () => {
+    const r = run(
+      base({
+        endMs: E,
+        topics: [{ text: "#tinyclub tinyclub", hashtags: ["tinyclub"], startMs: S, endMs: E, perMin: 6, authors: 6, authorPrefix: "tiny", reposts: { perMin: 400, reposters: 1000, prefix: "amp" } }],
+      }),
+    );
+    const keys = activeKeysAt(r, T0);
+    expect(keys.has("h:tinyclub")).toBe(false);
+    expect(keys.has("w:tinyclub")).toBe(false);
+  }, 30_000);
+
+  it("자기 리포스트: 작성자가 자기 글을 리포스트해도 Rp 불변", () => {
+    const selfRp = (ev: SlimEvent): SlimEvent[] =>
+      ev.c === "p" && ev.d.startsWith("did:plc:meme") ? [{ t: ev.t + 1, d: ev.d, c: "r", s: `at://${ev.d}/app.bsky.feed.post/${ev.k}` }] : [];
+    const withSelf = run(base({ endMs: E, topics: [meme()] }), {}, [], selfRp);
+    const without = run(base({ endMs: E, topics: [meme()] }));
+    const a = cardOf(withSelf, "w:skibidoodle")?.repostReach;
+    const b = cardOf(without, "w:skibidoodle")?.repostReach;
+    expect(a).toBeDefined();
+    expect(a?.reposters).toBe(b?.reposters);
+    expect(withSelf.engine.stats().repost.selfReposts).toBeGreaterThan(100);
+  }, 30_000);
 });

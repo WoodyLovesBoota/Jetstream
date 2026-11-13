@@ -659,9 +659,9 @@ body {
   text-overflow: ellipsis;
 }
 
-/* 무소속 커서 — 배경 잡음이라 조금 흐리게(색은 살려 둔다) */
+/* 무소속 커서 — 실제 표본 글이지만 카드가 없는 배경 잡음. 카드 커서보다 확실히 뒤로 물러나게 흐리게 */
 .sw-cursor[data-idle="true"] {
-  opacity: 0.72;
+  opacity: 0.35;
 }
 
 /* 새로 합류한 커서 — 기록지색 링 한 겹 */
@@ -681,6 +681,31 @@ body {
   border-radius: 50%;
   opacity: 0;
   pointer-events: none;
+}
+
+/* ↻ 리포스트 도달 링 — 클릭 링(원)과 달리 글자 하나가 돌며 위로 흩어진다 */
+.sw-reach-ring {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 18px;
+  height: 18px;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 카드 문장 안의 리포스트 도달 — 평소의 3배 이상 퍼 날라지면 이벤트색으로 강조 */
+.sw-reach {
+  white-space: nowrap;
+}
+
+.sw-reach[data-hot="true"] {
+  color: var(--ev);
+  font-weight: 600;
 }
 
 /* 커서 미리보기 — 떠 있는 요소라 그림자 허용 */

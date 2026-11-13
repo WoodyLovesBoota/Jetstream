@@ -39,6 +39,20 @@ export interface ReplayReport {
   hotMax: number;
   engageMax: number;
   snapshots: number;
+  /** 리포스트 증폭 R — 측정 구간 스냅샷의 진입 이벤트 R(평활) 분포 */
+  repost: {
+    r: { n: number; p10: number; p50: number; p90: number; min: number; max: number };
+    amp: { p10: number; p50: number; p90: number };
+    /** 진입 이벤트 중 score순과 rankScore순의 자리가 다른 비율(이벤트·스냅샷 평균) */
+    rankChangedFrac: number;
+    /** 상위 1위가 R 때문에 바뀐 스냅샷 비율 */
+    topChangedFrac: number;
+    /** 끝 시점 ρ(사용값)·EWMA·색인 상태 */
+    rho: { used: number; ewma: number; observed: number; warm: boolean };
+    ringFlagged: number;
+    botBanned: number;
+    attributedFrac: number;
+  };
 }
 
 export interface ReplayOptions extends Omit<EngineOptions, "nowMs"> {
@@ -77,6 +91,11 @@ export async function replay(events: AsyncIterable<SlimEvent> | Iterable<SlimEve
   let hotMax = 0;
   let engageMax = 0;
   let snapshots = 0;
+  const rVals: number[] = [];
+  const ampVals: number[] = [];
+  let rankChangedSum = 0;
+  let rankSnaps = 0;
+  let topChanged = 0;
   const wall0 = Date.now();
 
   const onTick = (now: number): void => {
@@ -92,7 +111,22 @@ export async function replay(events: AsyncIterable<SlimEvent> | Iterable<SlimEve
     trackedMax = Math.max(trackedMax, s.stats.tracked);
     hotMax = Math.max(hotMax, s.stats.hot);
     engageMax = Math.max(engageMax, s.stats.engage);
-    const top = s.events.filter((e) => e.state === "active").slice(0, 10);
+    const act = s.events.filter((e) => e.state === "active");
+    for (const e of act) {
+      if (e.repostReach === null) continue;
+      rVals.push(e.repostReach.r);
+      ampVals.push(e.repostReach.amp);
+    }
+    if (act.length >= 2) {
+      // act는 rankScore순 — score순으로 다시 세워 자리가 바뀐 이벤트 비율을 본다
+      const byScore = [...act].sort((x, y) => y.score - x.score);
+      let moved = 0;
+      for (let i = 0; i < act.length; i++) if (act[i].id !== byScore[i].id) moved++;
+      rankChangedSum += moved / act.length;
+      rankSnaps++;
+      if (act[0].id !== byScore[0].id) topChanged++;
+    }
+    const top = act.slice(0, 10);
     if (top.length > 0) {
       const bg = top.filter((e) => kindOf(e.titleKey) === "w" && engine?.isBackground(e.titleKey.slice(2)) === true).length;
       bgRatioSum += bg / top.length;
@@ -127,6 +161,20 @@ export async function replay(events: AsyncIterable<SlimEvent> | Iterable<SlimEve
   const wallSec = Math.max(0.001, (Date.now() - wall0) / 1000);
   const spanMin = (last - first) / 60_000;
   scoreMs.sort((a, b) => a - b);
+  rVals.sort((a, b) => a - b);
+  ampVals.sort((a, b) => a - b);
+  const r3 = (x: number): number => Number(x.toFixed(3));
+  const rs = engine?.stats().repost;
+  const repost: ReplayReport["repost"] = {
+    r: { n: rVals.length, p10: r3(pct(rVals, 0.1)), p50: r3(pct(rVals, 0.5)), p90: r3(pct(rVals, 0.9)), min: r3(rVals[0] ?? 0), max: r3(rVals.at(-1) ?? 0) },
+    amp: { p10: r3(pct(ampVals, 0.1)), p50: r3(pct(ampVals, 0.5)), p90: r3(pct(ampVals, 0.9)) },
+    rankChangedFrac: rankSnaps > 0 ? r3(rankChangedSum / rankSnaps) : 0,
+    topChangedFrac: rankSnaps > 0 ? r3(topChanged / rankSnaps) : 0,
+    rho: engine !== null ? (({ used, ewma, observed, warm }) => ({ used: r3(used), ewma: r3(ewma), observed, warm }))(engine.rhoInfo(last)) : { used: 0, ewma: 0, observed: 0, warm: false },
+    ringFlagged: rs?.ringFlagged ?? 0,
+    botBanned: rs?.botBanned ?? 0,
+    attributedFrac: rs !== undefined && rs.attributed + rs.unattributed > 0 ? r3(rs.attributed / (rs.attributed + rs.unattributed)) : 0,
+  };
   return {
     engine,
     report: {
@@ -145,6 +193,7 @@ export async function replay(events: AsyncIterable<SlimEvent> | Iterable<SlimEve
       hotMax,
       engageMax,
       snapshots,
+      repost,
     },
   };
 }
