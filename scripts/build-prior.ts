@@ -91,8 +91,8 @@ async function main(): Promise<void> {
     langShare: engine.languageShares(),
   };
   // ρ — 색인이 찬 뒤(30분+)의 EWMA만 믿는다. 녹화가 짧아 워밍업을 못 넘겼으면 싣지 않는다
-  const rho = engine.rhoInfo(t1);
-  if (rho.warm && rho.observed > 0) prior.rho = rho.ewma;
+  const rho = engine.stats().repost;
+  if (rho.warm && rho.rhoObserved > 0) prior.rho = rho.rhoEwma;
   const json = JSON.stringify(serializePrior(prior));
   writeFileSync(out, json);
   const gz = gzipSync(json).length;

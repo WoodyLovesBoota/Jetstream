@@ -5,6 +5,7 @@
 // 주제(topic): 정해진 시간대에 정해진 속도·작성자 풀로 특정 문구를 섞어 넣는다.
 // 봇: 소수 계정이 같은 태그를 도배한다.
 
+import { postUri } from "./extract.ts";
 import type { SlimEvent } from "./slim.ts";
 
 export function mulberry32(seed: number): () => number {
@@ -129,7 +130,7 @@ export function* synthStream(o: SynthOptions): Generator<SlimEvent> {
       const did = `did:plc:bg${Math.floor(r() * o.authorPool)}`;
       const rkey = rkeyOf(seq);
       batch.push({ t: at(), d: did, c: "p", k: rkey, x: words.join(" "), g: o.langs ?? ["en"] });
-      recent.push(`at://${did}/app.bsky.feed.post/${rkey}`);
+      recent.push(postUri(did, rkey));
       if (recent.length > 2000) recent.shift();
     }
 
@@ -155,7 +156,7 @@ export function* synthStream(o: SynthOptions): Generator<SlimEvent> {
         if (tp.hashtags !== undefined) ev.h = tp.hashtags;
         if (tp.quote !== undefined) ev.q = tp.quote;
         batch.push(ev);
-        const uri = `at://${did}/app.bsky.feed.post/${rkey}`;
+        const uri = postUri(did, rkey);
         if (topicFirstUri[i] === null) topicFirstUri[i] = uri;
         topicRecent[i].push(uri);
         if (topicRecent[i].length > 50) topicRecent[i].shift();

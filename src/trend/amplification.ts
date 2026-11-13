@@ -19,7 +19,10 @@
 
 import { biasFactor, ewmaUpdate } from "./baseline.ts";
 import { alphaFromHalfLife, type RepostConfig } from "./config.ts";
-import { PostIndex, parsePostUri, postKey } from "./postIndex.ts";
+import { parsePostUri } from "./extract.ts";
+import { postKey } from "./hash.ts";
+import { PostIndex } from "./postIndex.ts";
+import { BucketSeries } from "./tracked.ts";
 
 const MIN_MS = 60_000;
 /** 링 감지에 쓰는 이벤트별 리포스터 표본 상한 */
@@ -44,21 +47,11 @@ export function computeR(reposters: number, posts: number, rho: number, cfg: Pic
   return { expected, amp, r };
 }
 
-/** 겹침 계수 |A∩B| / min(|A|,|B|) */
-export function overlapCoef(a: ReadonlySet<number>, b: ReadonlySet<number>): number {
-  const [small, big] = a.size <= b.size ? [a, b] : [b, a];
-  if (small.size === 0) return 0;
-  let inter = 0;
-  for (const x of small) if (big.has(x)) inter++;
-  return inter / small.size;
-}
-
 /** DID별 분당 리포스트 레이트 리밋 — post 봇 필터(dedup.ts)와 별개 */
 export class RepostBotFilter {
   private minute = -1;
   private readonly count = new Map<number, number>();
   private readonly bannedUntil = new Map<number, number>();
-  bannedTotal = 0;
   private readonly perMin: number;
   private readonly banMin: number;
 
@@ -82,7 +75,6 @@ export class RepostBotFilter {
     this.count.set(didHash, n);
     if (n > this.perMin) {
       this.bannedUntil.set(didHash, minute + this.banMin);
-      this.bannedTotal++;
       return false;
     }
     return true;
@@ -101,7 +93,6 @@ export class RepostBotFilter {
 /** 링 의심 리포스터 — 표시 유지 시간 동안 가중치를 낮춘다 */
 export class RingDetector {
   private readonly flaggedUntil = new Map<number, number>();
-  flaggedTotal = 0;
   private readonly cfg: Pick<RepostConfig, "ringOverlap" | "ringMinSize" | "ringWeight" | "ringFlagMin">;
 
   constructor(cfg: Pick<RepostConfig, "ringOverlap" | "ringMinSize" | "ringWeight" | "ringFlagMin">) {
@@ -110,30 +101,26 @@ export class RingDetector {
 
   /**
    * 이벤트별 리포스터 집합(표본)을 짝지어 비교한다. 두 집합이 모두 ringMinSize 이상이고
-   * 겹침 계수 ≥ ringOverlap이면 교집합을 링 의심으로 표시한다. sizes는 표본 전 실제 크기.
+   * 겹침 계수 ≥ ringOverlap이면 교집합을 링 의심으로 표시한다. size는 표본 전 실제 크기.
    */
-  detect(sets: readonly { size: number; sample: ReadonlySet<number> }[], minute: number): number {
-    let flagged = 0;
+  detect(sets: readonly { size: number; sample: ReadonlySet<number> }[], minute: number): void {
     for (const [d, until] of this.flaggedUntil) if (until <= minute) this.flaggedUntil.delete(d);
+    const inter: number[] = [];
     for (let i = 0; i < sets.length; i++) {
       const a = sets[i];
       if (a.size < this.cfg.ringMinSize) continue;
       for (let j = i + 1; j < sets.length; j++) {
         const b = sets[j];
         if (b.size < this.cfg.ringMinSize) continue;
-        if (overlapCoef(a.sample, b.sample) < this.cfg.ringOverlap) continue;
+        // 겹침 계수 |A∩B| / min(|A|,|B|) — 교집합을 한 번만 모아 판정과 표시에 같이 쓴다
         const [small, big] = a.sample.size <= b.sample.size ? [a.sample, b.sample] : [b.sample, a.sample];
-        for (const d of small) {
-          if (!big.has(d)) continue;
-          if (!this.flaggedUntil.has(d)) {
-            flagged++;
-            this.flaggedTotal++;
-          }
-          this.flaggedUntil.set(d, minute + this.cfg.ringFlagMin);
-        }
+        if (small.size === 0) continue;
+        inter.length = 0;
+        for (const d of small) if (big.has(d)) inter.push(d);
+        if (inter.length < this.cfg.ringOverlap * small.size) continue;
+        for (const d of inter) this.flaggedUntil.set(d, minute + this.cfg.ringFlagMin);
       }
     }
-    return flagged;
   }
 
   weight(didHash: number, minute: number): number {
@@ -152,9 +139,9 @@ export class RhoEstimator {
   private n = 0;
   private readonly alpha: number;
   private readonly init: number;
-  private readonly reposts = new Float64Array(RHO_WINDOW + 1);
-  private readonly posts = new Float64Array(RHO_WINDOW + 1);
-  private readonly minuteOf = new Float64Array(RHO_WINDOW + 1).fill(-1);
+  /** 분 단위 링 — 끝난 5분 + 진행 중인 1분 */
+  private readonly reposts = new BucketSeries(RHO_WINDOW + 1);
+  private readonly posts = new BucketSeries(RHO_WINDOW + 1);
 
   constructor(halfLifeMin: number, init: number) {
     this.alpha = alphaFromHalfLife(halfLifeMin);
@@ -179,35 +166,17 @@ export class RhoEstimator {
     this.n = n;
   }
 
-  private slot(minute: number): number {
-    const i = ((minute % (RHO_WINDOW + 1)) + RHO_WINDOW + 1) % (RHO_WINDOW + 1);
-    if (this.minuteOf[i] !== minute) {
-      this.minuteOf[i] = minute;
-      this.reposts[i] = 0;
-      this.posts[i] = 0;
-    }
-    return i;
-  }
-
   addPost(minute: number): void {
-    this.posts[this.slot(minute)]++;
+    this.posts.add(minute);
   }
 
   addRepost(minute: number, w = 1): void {
-    this.reposts[this.slot(minute)] += w;
+    this.reposts.add(minute, w);
   }
 
   /** 끝난 5분(minute−5 … minute−1) 합 */
   window(minute: number): { reposts: number; posts: number } {
-    let r = 0;
-    let p = 0;
-    for (let m = minute - RHO_WINDOW; m < minute; m++) {
-      const i = ((m % (RHO_WINDOW + 1)) + RHO_WINDOW + 1) % (RHO_WINDOW + 1);
-      if (this.minuteOf[i] !== m) continue;
-      r += this.reposts[i];
-      p += this.posts[i];
-    }
-    return { reposts: r, posts: p };
+    return { reposts: this.reposts.sum(minute - 1, RHO_WINDOW), posts: this.posts.sum(minute - 1, RHO_WINDOW) };
   }
 
   /** 최근 5분 비율 — post가 너무 적으면 null */
@@ -238,7 +207,6 @@ export class RhoEstimator {
 class ReposterSets {
   readonly byCand = new Map<number, Map<number, number>>();
   private readonly cap: number;
-  saturated = 0;
 
   constructor(cap: number) {
     this.cap = cap;
@@ -252,10 +220,7 @@ class ReposterSets {
     }
     if (!m.has(didHash) && m.size >= this.cap) {
       this.pruneOne(m, minute);
-      if (m.size >= this.cap) {
-        this.saturated++;
-        return;
-      }
+      if (m.size >= this.cap) return; // 포화 — Rp는 상한에서 멈춘다
     }
     m.delete(didHash); // 삽입 순서 = 마지막 리포스트 순서로 유지
     m.set(didHash, minute);
@@ -304,7 +269,10 @@ export interface Reach {
 }
 
 export interface AmpStats {
+  /** E_e에 지금 쓰는 ρ(워밍업 중이면 ρ_now) */
   rho: number;
+  /** ρ EWMA(bias 보정) — prior에 싣는 값 */
+  rhoEwma: number;
   rhoNow: number | null;
   rhoObserved: number;
   warm: boolean;
@@ -417,7 +385,7 @@ export class RepostAmplifier {
   }
 
   /** 이벤트 합집합들로 링을 감지한다(진입 이벤트끼리만) */
-  detectRings(unions: readonly Set<number>[], minute: number): number {
+  detectRings(unions: readonly Set<number>[], minute: number): void {
     const sets = unions.map((u) => {
       if (u.size <= RING_SAMPLE) return { size: u.size, sample: u };
       const sample = new Set<number>();
@@ -427,7 +395,7 @@ export class RepostAmplifier {
       }
       return { size: u.size, sample };
     });
-    return this.rings.detect(sets, minute);
+    this.rings.detect(sets, minute);
   }
 
   reach(union: ReadonlySet<number>, posts: number, minute: number, nowMs: number): Reach {
@@ -455,6 +423,7 @@ export class RepostAmplifier {
     const entries = this.sets.entries();
     return {
       rho: this.rhoFor(nowMs),
+      rhoEwma: this.rho.value(),
       rhoNow: this.rho.now(minute),
       rhoObserved: this.rho.observed,
       warm: this.warm(nowMs),

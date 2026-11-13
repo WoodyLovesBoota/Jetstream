@@ -1,11 +1,13 @@
 // 리포스트 증폭 계수 R — 지시서(추가 작업) 6.1 단위 테스트
 
 import { describe, expect, it } from "vitest";
-import { RepostAmplifier, RhoEstimator, RepostBotFilter, computeR, overlapCoef } from "./amplification.ts";
+import { RepostAmplifier, RhoEstimator, RepostBotFilter, computeR } from "./amplification.ts";
 import { biasFactor } from "./baseline.ts";
 import { alphaFromHalfLife, DEFAULT_CONFIG, type RepostConfig } from "./config.ts";
-import { hash32 } from "./hash.ts";
-import { PostIndex, parsePostUri, postKey } from "./postIndex.ts";
+import { overlapCoef } from "./cluster.ts";
+import { parsePostUri } from "./extract.ts";
+import { hash32, postKey } from "./hash.ts";
+import { PostIndex } from "./postIndex.ts";
 
 const RC = DEFAULT_CONFIG.repost;
 const MIN = 60_000;

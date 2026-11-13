@@ -7,6 +7,7 @@ import { latestTrend, subscribeStream } from "@/lib/jetstream/useStreamWorker";
 import { Hydrator } from "@/src/trend/hydrate";
 import { SwarmController } from "./controller";
 import { cardColor } from "./cursors";
+import { capitalize, fmtMult, stateLabel } from "./labels";
 import HudPill from "./HudPill";
 import { publishRoster } from "./rosterBus";
 import { renderSpreading } from "./spreading";
@@ -23,7 +24,6 @@ interface Preview {
   y: number;
 }
 
-const LIFE_LABEL: Record<string, string> = { rising: "Rising", peak: "Peaking", fading: "Cooling" };
 
 function ago(ms: number): string {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
@@ -192,7 +192,7 @@ export default function SwarmCanvas() {
         <aside className="sw-drawer" aria-label={`Event details: ${ev.title}`} style={{ ["--ev" as string]: cardColor(ev) }}>
           <header>
             <span className="sw-drawer-kind">
-              {ev.state === "past" ? "Past trend" : ev.state === "watch" ? "Watching · not a trend yet" : `Trend · ${LIFE_LABEL[ev.lifecycle] ?? ev.lifecycle}`}
+              {ev.state === "active" ? `Trend · ${capitalize(stateLabel(ev))}` : ev.state === "watch" ? "Watching · not a trend yet" : capitalize(stateLabel(ev))}
             </span>
             <h2>{ev.title}</h2>
             <button type="button" onClick={() => setOpenId(null)} aria-label="Close">
@@ -203,7 +203,7 @@ export default function SwarmCanvas() {
             <div>
               <dt>Vs. usual</dt>
               <dd>
-                <span className="sw-num">×{ev.stats.mult >= 10 ? Math.round(ev.stats.mult) : ev.stats.mult.toFixed(1)}</span>
+                <span className="sw-num">×{fmtMult(ev.stats.mult)}</span>
               </dd>
             </div>
             <div>

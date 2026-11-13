@@ -30,3 +30,12 @@ export function combine32(a: number, b: number): number {
 export function postIdHash(did: string, rkey: string): number {
   return hash32(rkey, hash32(did));
 }
+
+/**
+ * post 식별자 52비트 키 — 최근 글 색인(postIndex)용. postIdHash(32비트)는 5분·500개 집합의
+ * 겹침 계수에 쓰여 충돌이 무해하지만, 색인은 10만 개라 32비트면 충돌 기대치가 1을 넘는다.
+ * postIdHash 위에 20비트를 더 붙여 안전한 정수 범위 안에서 충돌을 사실상 없앤다.
+ */
+export function postKey(did: string, rkey: string): number {
+  return postIdHash(did, rkey) * 0x100000 + (hash32(rkey, hash32(did, 0x9747b28c)) & 0xfffff);
+}

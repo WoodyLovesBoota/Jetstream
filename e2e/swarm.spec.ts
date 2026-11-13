@@ -6,6 +6,9 @@ import { expect, test, type Page } from "@playwright/test";
 
 const URL = "/?fixture=news";
 
+/** 커서가 다 그린 트렌드 카드 — 관찰 카드(watch)는 따로 더 생기므로 active만 센다 */
+const builtTrendCards = (page: Page) => page.locator('.sw-card[data-state="active"][data-built="true"]');
+
 function trackErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on("console", (m) => {
@@ -46,13 +49,13 @@ test("픽스처: 커서가 카드를 그리고(드래그→타이핑), 커서가
   });
   await page.goto(URL);
   // 초기 트렌드 카드 3개가 그려진다(clip-path 드래그 → built=true). 관찰 카드(watch)는 따로 더 생긴다
-  await expect(page.locator('.sw-card[data-state="active"][data-built="true"]')).toHaveCount(3, { timeout: 20_000 });
+  await expect(builtTrendCards(page)).toHaveCount(3, { timeout: 20_000 });
   // 드래그 도중 선택 박스와 크기 배지가 보였어야 한다 — built false→true 전이로 확인
   const log = await page.evaluate(() => (globalThis as unknown as { __builtLog: string[] }).__builtLog);
   expect(log.some((x) => x.endsWith(":true"))).toBe(true);
   // 제목은 다른 커서가 I-beam으로 타이핑해 채운다 — 그리기 직후엔 비어 있다가 곧 다 찬다
   await expect
-    .poll(async () => (await page.locator('.sw-card[data-state="active"][data-built="true"] .sw-title').allTextContents()).filter((t) => t.length > 0).length, { timeout: 10_000 })
+    .poll(async () => (await builtTrendCards(page).locator(".sw-title").allTextContents()).filter((t) => t.length > 0).length, { timeout: 10_000 })
     .toBe(3);
 
   // 커서가 카드로 모인다: 진입 이벤트마다 공전 커서 3개 이상
@@ -139,7 +142,7 @@ test("reduced-motion — 커서 없이 카드만 즉시", async ({ browser }) =>
   const page = await ctx.newPage();
   const errors = trackErrors(page);
   await page.goto(URL);
-  await expect(page.locator('.sw-card[data-state="active"][data-built="true"]')).toHaveCount(3, { timeout: 15_000 });
+  await expect(builtTrendCards(page)).toHaveCount(3, { timeout: 15_000 });
   await expect(page.locator('.sw-card[data-built="false"]')).toHaveCount(0);
   const s = await swarmStats(page);
   expect(s.cursors).toBe(0);
@@ -168,7 +171,7 @@ test("≤900px — 진단 패널 숨김, 가로 스크롤 없음", async ({ brow
 
 test("메인 스레드 — 10초 동안 long task(>50ms) 0", async ({ page }) => {
   await page.goto(URL);
-  await expect(page.locator('.sw-card[data-state="active"][data-built="true"]')).toHaveCount(3, { timeout: 20_000 });
+  await expect(builtTrendCards(page)).toHaveCount(3, { timeout: 20_000 });
   const longTasks = await page.evaluate(
     () =>
       new Promise<number[]>((resolve) => {
@@ -189,7 +192,7 @@ test("메인 스레드 — 10초 동안 long task(>50ms) 0", async ({ page }) =>
 
 test("스크린샷 1440×900", async ({ page }) => {
   await page.goto(URL);
-  await expect(page.locator('.sw-card[data-state="active"][data-built="true"]')).toHaveCount(3, { timeout: 20_000 });
+  await expect(builtTrendCards(page)).toHaveCount(3, { timeout: 20_000 });
   await page.waitForTimeout(6_000);
   await page.screenshot({ path: "docs/trend-engine/screens/events-1440x900.png" });
   const wc = page.locator(".sw-card", { has: page.locator(".sw-title", { hasText: "#worldcupfinal" }) });

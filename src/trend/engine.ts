@@ -17,6 +17,7 @@ import { AuthorDedup } from "./dedup.ts";
 import { bskyUrl, extractKeys, kindOf, labelOf, postUri, wordStream, type CandidateKind } from "./extract.ts";
 import { hash32, postIdHash } from "./hash.ts";
 import { HotInfo, type RecentPost } from "./hot.ts";
+import { POST_INDEX_CANDS } from "./postIndex.ts";
 import { newCandState, stepHysteresis, type CandState } from "./hysteresis.ts";
 import type { Prior } from "./prior.ts";
 import { accelRatio, evaluate, isConvergentKind, liftOf, noveltyOf, zScore, type EvalResult, type Lifecycle } from "./signals.ts";
@@ -69,13 +70,17 @@ function isCopypasta(recent: readonly RecentPost[]): boolean {
 /** 최근 post 본문 LRU — p:/q: 이벤트 제목과 퍼지는 글 본문을 하이드레이션 전에 채운다 */
 const POST_TEXT_CAP = 10_000;
 function reachOut(r: Reach, rSmooth: number): RepostReach {
-  return { reposters: Math.round(r.reposters), posts: r.posts, expected: r.expected, amp: r.amp, r: rSmooth, rRaw: r.r };
+  return { reposters: Math.round(r.reposters), posts: r.posts, expected: r.expected, amp: r.amp, r: rSmooth };
 }
+
+/** R 집계 대상 멤버인가 — p:(글 자체)는 색인 후보가 아니라 리포스터·P_e에서 뺀다 */
+const isContentKey = (k: string): boolean => kindOf(k) !== "p";
+const keyHashes = (keys: readonly string[]): number[] => keys.map((k) => hash32(k));
 
 /** 저장소에 ρ를 싣는 예약 키 — 후보 키(w:·b:…)와 겹치지 않는다 */
 export const RHO_MEMORY_KEY = "_:rho";
-/** 글 하나가 색인에 싣는 후보 수 */
-const INDEX_CANDS = 4;
+/** 한 번에 대기열에 둘 수 있는 ↻ 도달 핑 — like·repost 클릭 링 핑 자리를 다 먹지 않게 */
+const REACH_PINGS_MAX = 64;
 /** 기억 없는 후보가 진입하려면 필요한 실제 관측 분 수 */
 const MIN_HIST = 3;
 
@@ -140,6 +145,8 @@ export class TrendEngine {
   /** 이벤트(진입·관찰) 멤버 후보 해시 → 이벤트 ID — 리포스트 핑용 */
   private eventOfHash = new Map<number, number>();
   private readonly candHashBuf: number[] = [];
+  /** 대기열에 있는 ↻ 도달 핑 수 */
+  private reachPings = 0;
   private readonly hot = new Map<string, HotInfo>();
   private readonly hotEngage = new Map<string, HotInfo>();
   private readonly memory = new Map<string, MemEntry>();
@@ -249,7 +256,9 @@ export class TrendEngine {
   }
 
   drainPings(max = 64): EngagePing[] {
-    return this.pings.splice(0, Math.min(max, this.pings.length));
+    const out = this.pings.splice(0, Math.min(max, this.pings.length));
+    for (const p of out) if (p.reach === true) this.reachPings--;
+    return out;
   }
 
   // ── ingest ──────────────────────────────────────────────────────
@@ -444,13 +453,13 @@ export class TrendEngine {
     return { keys, counted: true };
   }
 
-  /** 이 글을 색인에 실을 후보 해시 — 이벤트 멤버 > 핫, 최대 INDEX_CANDS */
+  /** 이 글을 색인에 실을 후보 해시 — 이벤트 멤버 > 핫, 최대 POST_INDEX_CANDS */
   private indexCands(keys: readonly string[]): number[] {
     const out = this.candHashBuf;
     out.length = 0;
-    for (const k of keys) if (out.length < INDEX_CANDS && this.eventOfKey.has(k)) out.push(hash32(k));
+    for (const k of keys) if (out.length < POST_INDEX_CANDS && this.eventOfKey.has(k)) out.push(hash32(k));
     for (const k of keys) {
-      if (out.length >= INDEX_CANDS) break;
+      if (out.length >= POST_INDEX_CANDS) break;
       if (!this.eventOfKey.has(k) && this.hot.has(k)) out.push(hash32(k));
     }
     return out;
@@ -459,13 +468,11 @@ export class TrendEngine {
   /** 리포스트 → R 집계(봇·자기 리포스트 제외, 30분 안의 색인된 글만). p: 집계와는 별개다 */
   private noteRepost(ev: SlimEvent, didHash: number, minute: number, nowMs: number): void {
     const cands = this.amp.noteRepost({ reposterDid: ev.d, reposterHash: didHash, subjectUri: ev.s as string, minute, nowMs });
-    if (cands === null) return;
-    for (const h of cands) {
-      const id = this.eventOfHash.get(h);
-      if (id === undefined) continue;
-      if (this.pings.length < 512) this.pings.push({ uri: ev.s as string, eventId: id, repost: true, reach: true });
-      break;
-    }
+    if (cands === null || this.reachPings >= REACH_PINGS_MAX || this.pings.length >= 512) return;
+    const h = cands.find((c) => this.eventOfHash.has(c));
+    if (h === undefined) return;
+    this.pings.push({ uri: ev.s as string, eventId: this.eventOfHash.get(h) ?? null, repost: true, reach: true });
+    this.reachPings++;
   }
 
   private linksOf(keys: string[]): string[] {
@@ -898,7 +905,8 @@ export class TrendEngine {
       .sort((x, y) => (evals.get(y[0])?.res.score ?? 0) - (evals.get(x[0])?.res.score ?? 0));
 
     // 리포스트 도달 — 이벤트 멤버 리포스터 합집합. 링 감지는 진입 이벤트끼리만
-    const unions = comps.map((keys) => this.amp.union(this.memberHashes(keys), minute));
+    const contents = comps.map((keys) => keys.filter(isContentKey));
+    const unions = contents.map((keys) => this.amp.union(keyHashes(keys), minute));
     this.amp.detectRings(unions, minute);
 
     for (let ci = 0; ci < comps.length; ci++) {
@@ -917,7 +925,7 @@ export class TrendEngine {
       const prevCard = this.events.get(id);
       const card = this.makeCard(id, keys, activeSet, evals, nowMs, bNow, minute, prevCard);
       // R은 순위(rankScore)에만 — 진입·퇴출·생애주기는 위 score와 멤버 신호로 이미 정해졌다
-      const reach = this.amp.reach(unions[ci], this.eventPosts(keys, evals, nowMs), minute, nowMs);
+      const reach = this.amp.reach(unions[ci], this.eventPosts(contents[ci], evals, nowMs), minute, nowMs);
       const rSmooth = this.amp.smooth(id, reach.r);
       card.repostReach = reachOut(reach, rSmooth);
       card.rankScore = card.score * rSmooth;
@@ -948,7 +956,8 @@ export class TrendEngine {
     const watch = this.buildWatch(watchPool, evals, nextOf, usedIds, active, nowMs, bNow, minute, win);
     // 관찰 카드도 표시용 도달은 보여 준다(순위에는 안 쓴다 — 관찰 카드 순서는 z순)
     for (const w of watch) {
-      const reach = this.amp.reach(this.amp.union(this.memberHashes([w.titleKey]), minute), this.eventPosts([w.titleKey], evals, nowMs), minute, nowMs);
+      const keys = [w.titleKey].filter(isContentKey);
+      const reach = this.amp.reach(this.amp.union(keyHashes(keys), minute), this.eventPosts(keys, evals, nowMs), minute, nowMs);
       w.repostReach = reachOut(reach, reach.r);
     }
     this.amp.retain(new Set(active.map((e) => e.id)));
@@ -961,24 +970,16 @@ export class TrendEngine {
     return this.paint([...active, ...watch, ...past]);
   }
 
-  /** R 집계 대상 멤버 해시 — p:(글 자체)는 색인 후보가 아니므로 뺀다 */
-  private memberHashes(keys: readonly string[]): number[] {
-    const out: number[] = [];
-    for (const k of keys) if (!k.startsWith("p:")) out.push(hash32(k));
-    return out;
-  }
-
   /**
    * P_e — 5분 이벤트 post 수. 멤버 핫 기록의 post-ID 합집합(멤버 간 중복은 한 번)과
    * 멤버별 작성자 중복 제거 언급 수 x의 최댓값 중 큰 쪽. post-ID 기록은 후보당 500개 상한이라
-   * 큰 사건에서는 x가 더 정확하다.
+   * 큰 사건에서는 x가 더 정확하다. keys는 isContentKey로 거른 멤버.
    */
   private eventPosts(keys: readonly string[], evals: Map<string, Eval>, nowMs: number): number {
     const ids = new Set<number>();
     let maxX = 0;
     const from = nowMs - this.cfg.windowMin * MIN_MS;
     for (const k of keys) {
-      if (k.startsWith("p:")) continue;
       maxX = Math.max(maxX, evals.get(k)?.x ?? 0);
       const set = this.hot.get(k)?.postIds;
       if (set === undefined) continue;
@@ -1322,6 +1323,7 @@ export class TrendEngine {
 
   stats(g5 = 0): TrendStats {
     const d = this.dedup.stats();
+    const amp = this.amp.stats(this.lastScoreMs);
     let hotBytes = 0;
     for (const h of this.hot.values()) hotBytes += h.bytes();
     for (const h of this.hotEngage.values()) hotBytes += h.bytes();
@@ -1347,12 +1349,12 @@ export class TrendEngine {
         this.memory.size * 90 +
         d.pairsThisMinute * 24 +
         this.cand.size * 80 +
-        this.amp.stats(this.lastScoreMs).approxBytes,
+        amp.approxBytes,
       scoreMs: this.scoreMs,
       evaluated: this.evaluated,
       passed: this.passed,
       active: [...this.cand.values()].filter((s) => s.state === "active").length,
-      repost: this.amp.stats(this.lastScoreMs),
+      repost: amp,
     };
   }
 
@@ -1405,11 +1407,6 @@ export class TrendEngine {
 
   backgroundWords(): string[] {
     return [...this.background];
-  }
-
-  /** 지금 E_e에 쓰는 ρ와 EWMA 값 — prior 빌드·리플레이 리포트용 */
-  rhoInfo(nowMs: number): { used: number; ewma: number; observed: number; warm: boolean } {
-    return { used: this.amp.rhoFor(nowMs), ewma: this.amp.rho.value(), observed: this.amp.rho.observed, warm: this.amp.warm(nowMs) };
   }
 
   /** 언어별 평소 post 점유율(bias 보정 후) — prior의 langShare */

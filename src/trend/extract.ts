@@ -231,9 +231,15 @@ export function extractKeys(ev: SlimEvent, opt: ExtractOptions, out: string[], w
 }
 
 /** at://did/app.bsky.feed.post/rkey → bsky.app 링크. 형식이 다르면 null */
-export function bskyUrl(uri: string): string | null {
+/** at://{did}/app.bsky.feed.post/{rkey} → {did, rkey}. 글이 아니면 null */
+export function parsePostUri(uri: string): { did: string; rkey: string } | null {
   const m = /^at:\/\/([^/]+)\/app\.bsky\.feed\.post\/([^/]+)$/.exec(uri);
-  return m === null ? null : `https://bsky.app/profile/${m[1]}/post/${m[2]}`;
+  return m === null ? null : { did: m[1], rkey: m[2] };
+}
+
+export function bskyUrl(uri: string): string | null {
+  const p = parsePostUri(uri);
+  return p === null ? null : `https://bsky.app/profile/${p.did}/post/${p.rkey}`;
 }
 
 export function postUri(did: string, rkey: string): string {

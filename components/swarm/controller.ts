@@ -34,6 +34,7 @@ import {
   type Pt,
 } from "@/lib/swarm/motion";
 import { cardColor, ICONS, IDLE_COLOR, tagInk, wanderColor, type Shape } from "./cursors";
+import { fmtMult, KIND_LABEL, stateLabel } from "./labels";
 
 export const MAX_CURSORS = 150;
 const RING_POOL = 16;
@@ -42,20 +43,8 @@ const REACH_POOL = 12;
 const REACH_PER_SEC = 10;
 /** 이 배수 이상이면 카드의 리포스트 도달을 강조한다 */
 const REACH_HOT_AMP = 3;
-const LIFE_LABEL: Record<string, string> = { rising: "rising", peak: "peaking", fading: "cooling" };
 /** 진입 이벤트(active)와 관찰 카드(watch)는 커서가 모이는 살아있는 카드다 */
 const isLive = (ev: TrendEvent): boolean => ev.state !== "past";
-const stateLabel = (ev: TrendEvent): string => (ev.state === "past" ? "past trend" : ev.state === "watch" ? "watching" : LIFE_LABEL[ev.lifecycle]);
-const KIND_KO: Record<string, string> = {
-  h: "Hashtag",
-  b: "Phrase",
-  c: "Pair",
-  w: "Word",
-  u: "Link",
-  d: "Domain",
-  q: "Quote",
-  p: "Post",
-};
 
 type Mode = "idle" | "travel" | "orbit" | "leave" | "wander" | "drag" | "type";
 
@@ -460,9 +449,11 @@ export class SwarmController {
   /** like·repost 핑 → 이벤트 카드 위 클릭 링 */
   pingEngagements(pings: readonly EngagePing[]): void {
     if (this.reduced || this.paused || document.hidden) return;
-    const reach = pings.filter((p) => p.reach === true);
+    const clicks: EngagePing[] = [];
+    const reach: EngagePing[] = [];
+    for (const p of pings) (p.reach === true ? reach : clicks).push(p);
     if (reach.length > 0) this.pingReach(reach);
-    for (const p of pings.filter((q) => q.reach !== true).slice(0, 6)) {
+    for (const p of clicks.slice(0, 6)) {
       if (p.eventId === null) continue;
       const card = this.cards.get(p.eventId);
       if (card === undefined || !card.built || card.rect === null) continue;
@@ -624,8 +615,7 @@ export class SwarmController {
     card.el.dataset.state = ev.state;
     card.el.dataset.life = ev.lifecycle;
     card.el.setAttribute("aria-label", `${ev.title} — ${stateLabel(ev)}`);
-    card.el.dataset.state = ev.state;
-    const labelText = `${KIND_KO[ev.titleKind] ?? ""} · ${stateLabel(ev)}${ev.langs.length > 0 ? ` · ${ev.langs.join("/")}` : ""}`;
+    const labelText = `${KIND_LABEL[ev.titleKind] ?? ""} · ${stateLabel(ev)}${ev.langs.length > 0 ? ` · ${ev.langs.join("/")}` : ""}`;
     this.setField(card, "label", labelText, () => {
       card.label.textContent = labelText;
     });
@@ -634,7 +624,7 @@ export class SwarmController {
       card.title.textContent = title;
     });
     // 배지 대신 한 줄 문장 — 숫자만 고정폭(Plex Mono엔 한글이 없다). 편집 중엔 평문, 끝나면 숫자 span으로
-    const mult = ev.stats.mult >= 10 ? Math.round(ev.stats.mult).toString() : ev.stats.mult.toFixed(1);
+    const mult = fmtMult(ev.stats.mult);
     // 증감 문구는 트렌드만 — 관찰 카드는 직전 구간이 비어 가속 값이 뜻이 없다(접속 직후)
     const trend = ev.state !== "active" ? null : ev.lifecycle === "rising" ? " · ↑ rising" : ev.lifecycle === "fading" ? " · ↓ cooling" : null;
     // [글자, 숫자인가]
@@ -647,33 +637,25 @@ export class SwarmController {
       ...(ev.stats.isNew && ev.state !== "past" ? [[" · new", false] as [string, boolean]] : []),
       ...(trend !== null ? [[trend, false] as [string, boolean]] : []),
     ];
-    // 리포스트 도달 — "↻ 리포스터 n명 · ×amp". 지나간 카드는 뺀다(마지막 값이 지금 값처럼 보인다)
+    // 리포스트 도달 — "↻ n reposters · ×amp". 지나간 카드는 뺀다(마지막 값이 지금 값처럼 보인다)
     const rr = ev.state !== "past" ? ev.repostReach : null;
-    const ampText = rr === null ? "" : rr.amp >= 10 ? Math.round(rr.amp).toString() : rr.amp.toFixed(1);
-    const reachHot = rr !== null && rr.amp >= REACH_HOT_AMP;
-    this.setField(
-      card,
-      "meta",
-      parts.map((p) => p[0]).join("") + (rr === null ? "" : ` · ↻ ${rr.reposters} reposters · ×${ampText}`),
-      () => {
-        const num = (t: string): HTMLElement => {
-          const s = document.createElement("span");
-          s.className = "sw-num";
-          s.textContent = t;
-          return s;
-        };
-        const nodes: (string | Node)[] = parts.map(([t, isNum]) => (isNum ? num(t) : t));
-        if (rr !== null) {
-          const reach = document.createElement("span");
-          reach.className = "sw-reach";
-          if (reachHot) reach.dataset.hot = "true";
-          reach.title = `${ampText}× the ${rr.expected.toFixed(0)} reposters expected for this many posts`;
-          reach.append("↻ ", num(String(rr.reposters)), " reposters · ×", num(ampText));
-          nodes.push(" · ", reach);
-        }
-        card.meta.replaceChildren(...nodes);
-      },
-    );
+    const num = (t: string): HTMLElement => {
+      const el = h("span", "sw-num");
+      el.textContent = t;
+      return el;
+    };
+    const nodes: (string | Node)[] = parts.map(([t, isNum]) => (isNum ? num(t) : t));
+    if (rr !== null) {
+      const ampText = fmtMult(rr.amp);
+      const reach = h("span", "sw-reach");
+      if (rr.amp >= REACH_HOT_AMP) reach.dataset.hot = "true";
+      reach.title = `${ampText}× the ${rr.expected.toFixed(0)} reposters expected for this many posts`;
+      reach.append("↻ ", num(String(rr.reposters)), " reposters · ×", num(ampText));
+      nodes.push(" · ", reach);
+    }
+    // 타이핑 대상 = 렌더할 노드의 글자 그대로 — 두 벌로 만들면 타이핑과 최종 문장이 어긋난다
+    const metaText = nodes.map((n) => (typeof n === "string" ? n : n.textContent)).join("");
+    this.setField(card, "meta", metaText, () => card.meta.replaceChildren(...nodes));
     const max = Math.max(1, ...ev.spark);
     card.spark.setAttribute(
       "points",

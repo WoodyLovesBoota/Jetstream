@@ -4,8 +4,8 @@
 import type { SpreadingPost } from "@/lib/jetstream/protocol";
 import type { Hydrator } from "@/src/trend/hydrate";
 import { eventColor } from "./cursors";
+import { LIFE_LABEL } from "./labels";
 
-const LIFE_LABEL: Record<string, string> = { rising: "rising", peak: "peaking", fading: "cooling" };
 
 function shortUri(uri: string): string {
   const m = /^at:\/\/did:([^:]+):([^/]+)\/app\.bsky\.feed\.post\/(.+)$/.exec(uri);

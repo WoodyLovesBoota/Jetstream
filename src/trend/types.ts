@@ -74,10 +74,8 @@ export interface RepostReach {
   expected: number;
   /** (Rp+1)/(E+1) */
   amp: number;
-  /** 정렬에 쓰는 평활 R */
+  /** 정렬에 쓰는 평활 R(관찰 카드는 평활 없이 이번 패스 값) */
   r: number;
-  /** 이번 패스 R(평활 전) */
-  rRaw: number;
 }
 
 export interface SpreadingPost {

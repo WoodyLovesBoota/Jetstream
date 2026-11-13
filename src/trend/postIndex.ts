@@ -5,27 +5,9 @@
 //
 // 메모리: 삽입 순서 = 시간 순서인 원형 버퍼(typed array) + 조회용 Map(id → 칸).
 //   칸당 8(id) + 8(ts) + 16(후보 4) + 1 = 33바이트, Map 항목 ≈ 40바이트 → 10만 개 ≈ 7MB.
-// id는 52비트 해시 두 개를 이은 값이라 10만 개에서 충돌 기대치는 사실상 0이다.
-
-import { hash32 } from "./hash.ts";
+// id는 hash.ts의 postKey(52비트)라 10만 개에서 충돌 기대치는 사실상 0이다.
 
 export const POST_INDEX_CANDS = 4;
-
-/** did/rkey → 52비트 정수 키(안전한 정수 범위) */
-export function postKey(did: string, rkey: string): number {
-  const s = `${did}/${rkey}`;
-  const hi = hash32(s);
-  const lo = hash32(s, 0x9747b28c) & 0xfffff;
-  return hi * 0x100000 + lo;
-}
-
-/** at://{did}/app.bsky.feed.post/{rkey} → {did, rkey}. 글이 아니면 null */
-export function parsePostUri(uri: string): { did: string; rkey: string } | null {
-  if (!uri.startsWith("at://")) return null;
-  const parts = uri.slice(5).split("/");
-  if (parts.length !== 3 || parts[1] !== "app.bsky.feed.post" || parts[0] === "" || parts[2] === "") return null;
-  return { did: parts[0], rkey: parts[2] };
-}
 
 export class PostIndex {
   private readonly cap: number;
