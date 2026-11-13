@@ -42,7 +42,7 @@ function formatRate(ema: number): string {
   return ema >= 100 ? String(Math.round(ema)) : ema.toFixed(1);
 }
 
-const LABEL_KO: Record<string, string> = { post: "글", like: "좋아요", repost: "리포스트", follow: "팔로우" };
+const LABEL_KO: Record<string, string> = { post: "Posts", like: "Likes", repost: "Reposts", follow: "Follows" };
 
 export default function Gauges() {
   const stripRef = useRef<HTMLElement | null>(null);
@@ -115,7 +115,7 @@ export default function Gauges() {
               setText(
                 cell.delta,
                 dir === "flat"
-                  ? "안정"
+                  ? "steady"
                   : `${dir === "up" ? "↑" : "↓"}${Math.abs(pct).toFixed(0)}%`,
               );
               if (cell.delta.dataset.dir !== dir) cell.delta.dataset.dir = dir;
@@ -153,7 +153,7 @@ export default function Gauges() {
       className={styles.strip}
       aria-label="Gauges"
       ref={stripRef}
-      title="큰 숫자는 최근 3초 평균 속도, 옆의 증감은 1분 평균 대비"
+      title="Big number: average rate over the last 3s. Change: vs. the 1-minute average"
     >
       {KINDS.map((k) => (
         <div

@@ -15,7 +15,7 @@ import styles from "./Pulse.module.css";
 
 const WINDOW_OPTIONS = [60, 300] as const;
 type WindowSec = (typeof WINDOW_OPTIONS)[number];
-const WINDOW_LABEL: Record<WindowSec, string> = { 60: "1분", 300: "5분" };
+const WINDOW_LABEL: Record<WindowSec, string> = { 60: "1m", 300: "5m" };
 
 interface SeriesDef {
   label: string;
@@ -240,7 +240,7 @@ function drawGaps(u: uPlot, gaps: GapMarker[], fontFamily: string): void {
       ctx.fillStyle = withAlpha(color, 0.85);
       ctx.font = `10px ${fontFamily}`;
       ctx.textBaseline = "top";
-      ctx.fillText(gap.replayed ? "복구" : "끊김", left + 4, u.bbox.top + 4);
+      ctx.fillText(gap.replayed ? "recovered" : "gap", left + 4, u.bbox.top + 4);
     }
   }
 
@@ -446,12 +446,12 @@ export default function Pulse() {
         <ul className={styles.legend}>
           <li className={styles.legendItem}>
             <span className={styles.swatch} style={{ background: TYPE_COLORS.other }} />
-            기타 컬렉션
+            Other collections
           </li>
           {/* 단절 마커 범례 — 띠가 나타났을 때 무슨 뜻인지 화면 안에서 읽히도록 */}
           {[
-            { label: "끊김", color: GAP_STROKE },
-            { label: "복구", color: REPLAY_STROKE },
+            { label: "Gap", color: GAP_STROKE },
+            { label: "Recovered", color: REPLAY_STROKE },
           ].map((m) => (
             <li key={m.label} className={styles.legendItem}>
               <span
@@ -462,7 +462,7 @@ export default function Pulse() {
             </li>
           ))}
         </ul>
-        <div className={styles.windowToggle} role="group" aria-label="시간 범위">
+        <div className={styles.windowToggle} role="group" aria-label="Time range">
           {WINDOW_OPTIONS.map((w) => (
             <button
               key={w}

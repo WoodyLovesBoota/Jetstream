@@ -24,7 +24,7 @@ export default function Header() {
       <div className={styles.brand}>
         {/* 페이지 유일의 h1 — 패널 이름(h2)들의 상위 표제 */}
         <h1 className={styles.mark}>Jetstream</h1>
-        <p className={styles.sub}>Bluesky 전체 공개 이벤트를 브라우저에서 직접 받아 그리는 실시간 계기판</p>
+        <p className={styles.sub}>A live instrument panel that streams every public Bluesky event straight into the browser</p>
       </div>
       <div className={styles.controls}>
         <span
@@ -45,11 +45,11 @@ export default function Header() {
           onClick={() => setFilterMode(full ? "filtered" : "full")}
           title={
             full
-              ? "필터 없음 — 모든 컬렉션. 누르면 feed.* + graph.follow로 좁힌다"
-              : "app.bsky.feed.* + app.bsky.graph.follow. 누르면 풀 스트림으로 연다"
+              ? "No filter — every collection. Click to narrow to feed.* + graph.follow"
+              : "app.bsky.feed.* + app.bsky.graph.follow. Click to open the full stream"
           }
         >
-          {full ? "전체 컬렉션" : "주요 컬렉션"}
+          {full ? "All collections" : "Core collections"}
         </button>
         <button
           type="button"
@@ -57,9 +57,9 @@ export default function Header() {
           data-paused={paused}
           aria-pressed={paused}
           onClick={toggleRenderPause}
-          title="렌더만 정지한다 — 워커는 계속 수신·집계하고, 재개하면 최신 상태로 점프한다"
+          title="Pauses rendering only — the worker keeps receiving and counting, and resuming jumps to the latest state"
         >
-          {paused ? "재개" : "일시정지"}
+          {paused ? "Resume" : "Pause"}
         </button>
       </div>
     </header>

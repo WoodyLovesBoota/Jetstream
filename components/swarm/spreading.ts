@@ -5,7 +5,7 @@ import type { SpreadingPost } from "@/lib/jetstream/protocol";
 import type { Hydrator } from "@/src/trend/hydrate";
 import { eventColor } from "./cursors";
 
-const LIFE_KO: Record<string, string> = { rising: "떠오름", peak: "정점", fading: "식는 중" };
+const LIFE_LABEL: Record<string, string> = { rising: "rising", peak: "peaking", fading: "cooling" };
 
 function shortUri(uri: string): string {
   const m = /^at:\/\/did:([^:]+):([^/]+)\/app\.bsky\.feed\.post\/(.+)$/.exec(uri);
@@ -21,7 +21,7 @@ export function renderSpreading(
   if (posts.length === 0) {
     const li = document.createElement("li");
     li.className = "sp-empty";
-    li.textContent = "아직 5분 안에 좋아요·리포스트가 몰리는 글이 없습니다";
+    li.textContent = "No post is drawing a burst of likes or reposts yet";
     list.replaceChildren(li);
     return;
   }
@@ -39,14 +39,14 @@ export function renderSpreading(
       body.className = "sp-body";
       const text = document.createElement("p");
       text.className = "sp-text";
-      text.textContent = hyd?.text || p.text || "본문을 불러오지 못했습니다 — 원문 링크로 확인하세요";
+      text.textContent = hyd?.text || p.text || "Couldn't load the text — open the original post";
       if (hyd === undefined && p.text === null) text.dataset.missing = "true";
       const meta = document.createElement("div");
       meta.className = "sp-meta";
       const who = document.createElement("span");
       who.textContent = hyd !== undefined && hyd.handle !== "" ? `@${hyd.handle}` : shortUri(p.uri);
       const nums = document.createElement("span");
-      nums.textContent = `5분 ${p.p5}명 · 30분 ${p.p30}명 · ${LIFE_KO[p.lifecycle]}`;
+      nums.textContent = `${p.p5} people in 5m · ${p.p30} in 30m · ${LIFE_LABEL[p.lifecycle]}`;
       meta.append(who, nums);
       if (p.eventId !== null) {
         const ci = colorOf(p.eventId);
@@ -54,7 +54,7 @@ export function renderSpreading(
           const dot = document.createElement("i");
           dot.className = "sp-dot";
           dot.style.background = eventColor(ci);
-          dot.title = "이벤트에 속한 글";
+          dot.title = "Part of a trend card";
           meta.prepend(dot);
         }
       }
@@ -66,7 +66,7 @@ export function renderSpreading(
         a.href = p.url;
         a.target = "_blank";
         a.rel = "noopener noreferrer";
-        a.textContent = "원문";
+        a.textContent = "Original";
         li.append(a);
       }
       return li;

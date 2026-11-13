@@ -61,9 +61,9 @@ export default function Tape() {
 
       const t = snapshot.tapeStats;
       if (strideRef.current && sampledRef.current && skippedRef.current) {
-        setText(strideRef.current, t.strideN === 1 ? "전부 표시" : `${t.strideN}건 중 1건 표시`);
-        setText(sampledRef.current, `초당 ${t.sampledPerSec}건 표본`);
-        setText(skippedRef.current, `초당 ${t.skippedPerSec}건 건너뜀`);
+        setText(strideRef.current, t.strideN === 1 ? "showing all" : `showing 1 in ${t.strideN}`);
+        setText(sampledRef.current, `${t.sampledPerSec}/s sampled`);
+        setText(skippedRef.current, `${t.skippedPerSec}/s skipped`);
       }
 
       if (snapshot.tapeRows.length === 0) return;
@@ -115,13 +115,13 @@ export default function Tape() {
     <div className={styles.root} data-swarm-origin>
       <div className={styles.statusBar}>
         <p className={styles.status}>
-          <span ref={strideRef}>전부 표시</span>
-          <span ref={sampledRef}>초당 0건 표본</span>
-          <span ref={skippedRef}>초당 0건 건너뜀</span>
+          <span ref={strideRef}>showing all</span>
+          <span ref={sampledRef}>0/s sampled</span>
+          <span ref={skippedRef}>0/s skipped</span>
         </p>
         {!autoScroll && (
           <button type="button" className={styles.jumpBtn} onClick={jumpToLive}>
-            최신 글로 이동
+            Jump to latest
           </button>
         )}
       </div>
@@ -133,12 +133,12 @@ export default function Tape() {
         // 스크롤 컨테이너를 키보드로도 굴릴 수 있게(Safari는 스크롤러를 자동 포커스하지 않는다)
         tabIndex={0}
         role="region"
-        aria-label="새 게시물 목록"
+        aria-label="New posts"
         onScroll={handleScroll}
         data-rows={rows.length}
       >
         {rows.length === 0 ? (
-          <p className={styles.empty}>첫 게시물을 기다리는 중…</p>
+          <p className={styles.empty}>Waiting for the first post…</p>
         ) : (
           <div className={styles.spacer} style={{ height: rowVirtualizer.getTotalSize() }}>
             {rowVirtualizer.getVirtualItems().map((vi) => {

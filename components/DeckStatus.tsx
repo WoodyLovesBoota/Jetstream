@@ -38,9 +38,9 @@ export default function DeckStatus() {
       if (detailRef.current !== null && next === "failed") {
         const retry =
           s.conn.retryInMs > 0
-            ? `${Math.ceil(s.conn.retryInMs / 1000)}초 뒤 다시 시도합니다.`
-            : "다시 연결하는 중입니다.";
-        const text = `공식 인스턴스를 모두 돌며 ${s.conn.attempt}번 시도했습니다. ${retry}`;
+            ? `Retrying in ${Math.ceil(s.conn.retryInMs / 1000)}s.`
+            : "Reconnecting.";
+        const text = `Tried every public instance ${s.conn.attempt} times. ${retry}`;
         if (detailRef.current.textContent !== text) detailRef.current.textContent = text;
       }
     });
@@ -61,19 +61,19 @@ export default function DeckStatus() {
           </span>
           {!failed && <span className={styles.sweep} />}
         </div>
-        <p className={styles.label}>{failed ? "연결이 끊겼습니다" : "파이어호스에 연결하는 중…"}</p>
+        <p className={styles.label}>{failed ? "Connection lost" : "Connecting to the firehose…"}</p>
         <p className={styles.sub}>
-          인스턴스{" "}
+          Instance{" "}
           <span className={styles.inst} ref={instRef}>
             —
           </span>
         </p>
         {failed ? (
           <p className={styles.detail} ref={detailRef}>
-            공식 인스턴스를 모두 시도했습니다. 다시 연결하는 중입니다.
+            Tried every public instance. Reconnecting.
           </p>
         ) : (
-          <p className={styles.detail}>WebSocket을 열고 첫 이벤트를 기다립니다.</p>
+          <p className={styles.detail}>Opening the WebSocket and waiting for the first event.</p>
         )}
       </div>
     </div>

@@ -1262,7 +1262,7 @@ export class TrendEngine {
     if (pUri !== null) {
       // 글 본문: 세션 중 본 글이면 LRU에서, 아니면 UI가 getPosts로 하이드레이션한다
       const known = this.postTexts.get(pUri);
-      title = known?.text.slice(0, 80) || `글 ${pUri.split("/").pop() ?? ""}`;
+      title = known?.text.slice(0, 80) || `Post ${pUri.split("/").pop() ?? ""}`;
       if (known !== undefined && !representativePosts.some((p) => p.rkey === known.rkey && p.did === known.did)) {
         representativePosts.unshift({
           did: known.did,

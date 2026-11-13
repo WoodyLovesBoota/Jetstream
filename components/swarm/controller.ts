@@ -42,19 +42,19 @@ const REACH_POOL = 12;
 const REACH_PER_SEC = 10;
 /** 이 배수 이상이면 카드의 리포스트 도달을 강조한다 */
 const REACH_HOT_AMP = 3;
-const LIFE_KO: Record<string, string> = { rising: "떠오름", peak: "정점", fading: "식는 중" };
+const LIFE_LABEL: Record<string, string> = { rising: "rising", peak: "peaking", fading: "cooling" };
 /** 진입 이벤트(active)와 관찰 카드(watch)는 커서가 모이는 살아있는 카드다 */
 const isLive = (ev: TrendEvent): boolean => ev.state !== "past";
-const stateKo = (ev: TrendEvent): string => (ev.state === "past" ? "지나간 트렌드" : ev.state === "watch" ? "관찰 중" : LIFE_KO[ev.lifecycle]);
+const stateLabel = (ev: TrendEvent): string => (ev.state === "past" ? "past trend" : ev.state === "watch" ? "watching" : LIFE_LABEL[ev.lifecycle]);
 const KIND_KO: Record<string, string> = {
-  h: "해시태그",
-  b: "구",
-  c: "짝",
-  w: "단어",
-  u: "링크",
-  d: "도메인",
-  q: "인용",
-  p: "글",
+  h: "Hashtag",
+  b: "Phrase",
+  c: "Pair",
+  w: "Word",
+  u: "Link",
+  d: "Domain",
+  q: "Quote",
+  p: "Post",
 };
 
 type Mode = "idle" | "travel" | "orbit" | "leave" | "wander" | "drag" | "type";
@@ -623,9 +623,9 @@ export class SwarmController {
     card.el.style.setProperty("--ev", color);
     card.el.dataset.state = ev.state;
     card.el.dataset.life = ev.lifecycle;
-    card.el.setAttribute("aria-label", `${ev.title} — ${stateKo(ev)}`);
+    card.el.setAttribute("aria-label", `${ev.title} — ${stateLabel(ev)}`);
     card.el.dataset.state = ev.state;
-    const labelText = `${KIND_KO[ev.titleKind] ?? ""} · ${stateKo(ev)}${ev.langs.length > 0 ? ` · ${ev.langs.join("/")}` : ""}`;
+    const labelText = `${KIND_KO[ev.titleKind] ?? ""} · ${stateLabel(ev)}${ev.langs.length > 0 ? ` · ${ev.langs.join("/")}` : ""}`;
     this.setField(card, "label", labelText, () => {
       card.label.textContent = labelText;
     });
@@ -636,15 +636,15 @@ export class SwarmController {
     // 배지 대신 한 줄 문장 — 숫자만 고정폭(Plex Mono엔 한글이 없다). 편집 중엔 평문, 끝나면 숫자 span으로
     const mult = ev.stats.mult >= 10 ? Math.round(ev.stats.mult).toString() : ev.stats.mult.toFixed(1);
     // 증감 문구는 트렌드만 — 관찰 카드는 직전 구간이 비어 가속 값이 뜻이 없다(접속 직후)
-    const trend = ev.state !== "active" ? null : ev.lifecycle === "rising" ? " · ↑ 늘어나는 중" : ev.lifecycle === "fading" ? " · ↓ 식는 중" : null;
+    const trend = ev.state !== "active" ? null : ev.lifecycle === "rising" ? " · ↑ rising" : ev.lifecycle === "fading" ? " · ↓ cooling" : null;
     // [글자, 숫자인가]
     const parts: [string, boolean][] = [
-      [ev.state === "past" ? "최고 평소의 " : "평소의 ", false],
+      [ev.state === "past" ? "peaked at " : "", false],
       [mult, true],
-      ["배 · 작성자 ", false],
+      ["× usual · ", false],
       [String(ev.stats.u), true],
-      ["명", false],
-      ...(ev.stats.isNew && ev.state !== "past" ? [[" · 처음 보는 말", false] as [string, boolean]] : []),
+      [" authors", false],
+      ...(ev.stats.isNew && ev.state !== "past" ? [[" · new", false] as [string, boolean]] : []),
       ...(trend !== null ? [[trend, false] as [string, boolean]] : []),
     ];
     // 리포스트 도달 — "↻ 리포스터 n명 · ×amp". 지나간 카드는 뺀다(마지막 값이 지금 값처럼 보인다)
@@ -654,7 +654,7 @@ export class SwarmController {
     this.setField(
       card,
       "meta",
-      parts.map((p) => p[0]).join("") + (rr === null ? "" : `|${rr.reposters}|${ampText}|${reachHot ? 1 : 0}`),
+      parts.map((p) => p[0]).join("") + (rr === null ? "" : ` · ↻ ${rr.reposters} reposters · ×${ampText}`),
       () => {
         const num = (t: string): HTMLElement => {
           const s = document.createElement("span");
@@ -667,8 +667,8 @@ export class SwarmController {
           const reach = document.createElement("span");
           reach.className = "sw-reach";
           if (reachHot) reach.dataset.hot = "true";
-          reach.title = `평소 기대 리포스터 ${rr.expected.toFixed(0)}명 대비 ${ampText}배`;
-          reach.append("↻ 리포스터 ", num(String(rr.reposters)), "명 · ×", num(ampText));
+          reach.title = `${ampText}× the ${rr.expected.toFixed(0)} reposters expected for this many posts`;
+          reach.append("↻ ", num(String(rr.reposters)), " reposters · ×", num(ampText));
           nodes.push(" · ", reach);
         }
         card.meta.replaceChildren(...nodes);

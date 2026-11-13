@@ -11,11 +11,11 @@ export default function Shell({ canvas, rail, inspector, overlay }: { canvas: Re
     <div className="shell" data-panel={open ? "open" : "closed"}>
       <Toolbar panelOpen={open} onTogglePanel={() => setOpen((v) => !v)} />
       <div className="shell-body">
-        <aside className="rail" aria-label="수집 데이터">
+        <aside className="rail" aria-label="Live data">
           {rail}
         </aside>
         <main className="shell-canvas">{canvas}</main>
-        <aside id="inspector" className="inspector" aria-label="진단 패널" hidden={!open}>
+        <aside id="inspector" className="inspector" aria-label="Diagnostics" hidden={!open}>
           {inspector}
         </aside>
       </div>

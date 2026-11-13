@@ -20,13 +20,13 @@ export default function Home() {
       canvas={<SwarmCanvas />}
       rail={
         <div className={styles.rail}>
-          <Panel name="수신량" note="최근 1분 평균 대비" className={styles.pulse} readouts={<Gauges />}>
+          <Panel name="Throughput" note="vs. 1-minute average" className={styles.pulse} readouts={<Gauges />}>
             <Pulse />
           </Panel>
-          <Panel name="새 글" note="표본" className={styles.tape}>
+          <Panel name="New posts" note="sample" className={styles.tape}>
             <Tape />
           </Panel>
-          <Panel name="언어" note="최근 60초" className={styles.mix}>
+          <Panel name="Languages" note="last 60s" className={styles.mix}>
             <Mix />
           </Panel>
         </div>

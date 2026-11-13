@@ -246,7 +246,7 @@ export default function Hud() {
             root.dataset.degraded = String(bp.degraded);
           }
           if (bp.degraded) {
-            setText(degradedDetail, `${bp.m}건 중 1건만 파싱, 예산 대비 부하 ${bp.loadPct}%`);
+            setText(degradedDetail, `parsing 1 in ${bp.m}, load ${bp.loadPct}% of budget`);
           }
           root.dataset.m = String(bp.m);
         }
@@ -264,8 +264,8 @@ export default function Hud() {
           const buffered = (snapshot?.counters.recvTotal ?? 0) - recvAtPause;
           setText(
             pausedDetail,
-            `${(renderPausedForMs() / 1000).toFixed(1)}초째, 그동안 ` +
-              `${buffered.toLocaleString("en-US")}건 수신`,
+            `${(renderPausedForMs() / 1000).toFixed(1)}s so far, ` +
+              `${buffered.toLocaleString("en-US")} events received`,
           );
           root.dataset.buffered = String(buffered);
         }
@@ -321,7 +321,7 @@ export default function Hud() {
       data-m="1"
     >
       <div className={styles.head}>
-        <span className={styles.title}>진단</span>
+        <span className={styles.title}>Diagnostics</span>
         <span className={styles.headRight}>
           {/* 측정 모드 표시 — "m" 키/하니스로 켤 때만 보인다(닫힌 창 수를 함께 센다) */}
           <span className={styles.rec} ref={recRef} data-rec hidden>
@@ -340,15 +340,15 @@ export default function Hud() {
       */}
       <div className={styles.notices} aria-live="polite">
         <p className={styles.notice} data-kind="degraded" ref={degradedRef} hidden>
-          <span className={styles.noticeTitle}>부하 경감 중</span>
+          <span className={styles.noticeTitle}>Shedding load</span>
           <span className={styles.noticeDetail} ref={degradedDetailRef}>
-            1건 중 1건만 파싱
+            parsing 1 in 1
           </span>
         </p>
         <p className={styles.notice} data-kind="paused" ref={pausedRef} hidden>
-          <span className={styles.noticeTitle}>화면 정지, 수집은 계속</span>
+          <span className={styles.noticeTitle}>Screen paused, still collecting</span>
           <span className={styles.noticeDetail} ref={pausedDetailRef}>
-            0.0초째
+            0.0s so far
           </span>
         </p>
       </div>

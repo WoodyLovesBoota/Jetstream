@@ -21,7 +21,7 @@ export default function Panel({ name, note, className, readouts, children }: Pan
         {readouts}
       </header>
       <div className={styles.body}>
-        {children ?? <p className={styles.empty}>스트림이 연결되지 않았습니다</p>}
+        {children ?? <p className={styles.empty}>Stream not connected</p>}
       </div>
     </section>
   );

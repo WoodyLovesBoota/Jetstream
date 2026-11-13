@@ -45,14 +45,14 @@ test("픽스처: 커서가 카드를 그리고(드래그→타이핑), 커서가
     }).observe(document, { subtree: true, attributes: true, attributeFilter: ["data-built"] });
   });
   await page.goto(URL);
-  // 초기 카드 3개가 그려진다(clip-path 드래그 → built=true)
-  await expect(page.locator('.sw-card[data-built="true"]')).toHaveCount(3, { timeout: 20_000 });
+  // 초기 트렌드 카드 3개가 그려진다(clip-path 드래그 → built=true). 관찰 카드(watch)는 따로 더 생긴다
+  await expect(page.locator('.sw-card[data-state="active"][data-built="true"]')).toHaveCount(3, { timeout: 20_000 });
   // 드래그 도중 선택 박스와 크기 배지가 보였어야 한다 — built false→true 전이로 확인
   const log = await page.evaluate(() => (globalThis as unknown as { __builtLog: string[] }).__builtLog);
   expect(log.some((x) => x.endsWith(":true"))).toBe(true);
   // 제목은 다른 커서가 I-beam으로 타이핑해 채운다 — 그리기 직후엔 비어 있다가 곧 다 찬다
   await expect
-    .poll(async () => (await page.locator('.sw-card[data-built="true"] .sw-title').allTextContents()).filter((t) => t.length > 0).length, { timeout: 10_000 })
+    .poll(async () => (await page.locator('.sw-card[data-state="active"][data-built="true"] .sw-title').allTextContents()).filter((t) => t.length > 0).length, { timeout: 10_000 })
     .toBe(3);
 
   // 커서가 카드로 모인다: 진입 이벤트마다 공전 커서 3개 이상
@@ -73,7 +73,7 @@ test("픽스처: 커서가 카드를 그리고(드래그→타이핑), 커서가
   expect(errors).toEqual([]);
 });
 
-test("픽스처: 식는 이벤트는 지나간 트렌드로 흐려지고 커서가 흩어진다", async ({ page }) => {
+test("픽스처: 식는 이벤트는 지나간 트렌드로 물러나고(회색) 커서가 흩어진다", async ({ page }) => {
   test.setTimeout(240_000);
   await page.goto(URL);
   const aurora = page.locator(".sw-card", { has: page.locator(".sw-title", { hasText: "#aurora" }) });
@@ -83,9 +83,17 @@ test("픽스처: 식는 이벤트는 지나간 트렌드로 흐려지고 커서�
   await expect(aurora).toHaveAttribute("data-state", "past", { timeout: 200_000 });
   // 흩어짐: 몇 초 안에 그 이벤트 커서가 0
   await expect.poll(async () => (await swarmStats(page)).byEvent[id] ?? 0, { timeout: 10_000 }).toBe(0);
-  // 흐리게 남는다
-  const opacity = await aurora.evaluate((el) => Number(getComputedStyle(el).opacity));
-  expect(opacity).toBeLessThan(0.6);
+  // 회색으로 남는다 — 디자인 개편 뒤 지나간 카드는 투명도 대신 --ink-3 색으로 물러난다
+  const colors = await aurora.evaluate((el) => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--ink-3)";
+    el.appendChild(probe);
+    const ink3 = getComputedStyle(probe).color;
+    probe.remove();
+    const frame = el.querySelector(".sw-frame");
+    return { ink3, frame: frame === null ? null : getComputedStyle(frame).color };
+  });
+  expect(colors.frame).toBe(colors.ink3);
 });
 
 test("리포스트 도달 — 카드에 ↻ 리포스터 표시, 크게 퍼지는 #worldcupfinal은 강조, 콘솔 에러 0", async ({ page }) => {
@@ -119,7 +127,7 @@ test("카드를 누르면 상세 서랍 — 대표 글·관련·링크", async (
 
 test("퍼지는 글 탭 — 좋아요가 몰리는 글", async ({ page }) => {
   await page.goto(URL);
-  await page.getByRole("tab", { name: "퍼지는 글" }).click();
+  await page.getByRole("tab", { name: "Hot posts" }).click();
   const first = page.locator(".sp-row").first();
   await expect(first).toBeVisible({ timeout: 20_000 });
   await expect(first.locator(".sp-text")).toContainText("city budget");
@@ -131,7 +139,7 @@ test("reduced-motion — 커서 없이 카드만 즉시", async ({ browser }) =>
   const page = await ctx.newPage();
   const errors = trackErrors(page);
   await page.goto(URL);
-  await expect(page.locator('.sw-card[data-built="true"]')).toHaveCount(3, { timeout: 15_000 });
+  await expect(page.locator('.sw-card[data-state="active"][data-built="true"]')).toHaveCount(3, { timeout: 15_000 });
   await expect(page.locator('.sw-card[data-built="false"]')).toHaveCount(0);
   const s = await swarmStats(page);
   expect(s.cursors).toBe(0);
@@ -160,7 +168,7 @@ test("≤900px — 진단 패널 숨김, 가로 스크롤 없음", async ({ brow
 
 test("메인 스레드 — 10초 동안 long task(>50ms) 0", async ({ page }) => {
   await page.goto(URL);
-  await expect(page.locator('.sw-card[data-built="true"]')).toHaveCount(3, { timeout: 20_000 });
+  await expect(page.locator('.sw-card[data-state="active"][data-built="true"]')).toHaveCount(3, { timeout: 20_000 });
   const longTasks = await page.evaluate(
     () =>
       new Promise<number[]>((resolve) => {
@@ -181,18 +189,18 @@ test("메인 스레드 — 10초 동안 long task(>50ms) 0", async ({ page }) =>
 
 test("스크린샷 1440×900", async ({ page }) => {
   await page.goto(URL);
-  await expect(page.locator('.sw-card[data-built="true"]')).toHaveCount(3, { timeout: 20_000 });
+  await expect(page.locator('.sw-card[data-state="active"][data-built="true"]')).toHaveCount(3, { timeout: 20_000 });
   await page.waitForTimeout(6_000);
   await page.screenshot({ path: "docs/trend-engine/screens/events-1440x900.png" });
   const wc = page.locator(".sw-card", { has: page.locator(".sw-title", { hasText: "#worldcupfinal" }) });
   await expect(wc).toHaveAttribute("data-built", "true", { timeout: 75_000 });
   await page.waitForTimeout(8_000);
   await page.screenshot({ path: "docs/trend-engine/screens/events-later-1440x900.png" });
-  await page.getByRole("tab", { name: "퍼지는 글" }).click();
+  await page.getByRole("tab", { name: "Hot posts" }).click();
   await page.waitForTimeout(500);
   await page.screenshot({ path: "docs/trend-engine/screens/spreading-1440x900.png" });
-  await page.getByRole("tab", { name: "이벤트" }).click();
-  await page.getByRole("button", { name: "진단" }).click();
+  await page.getByRole("tab", { name: "Trend cards" }).click();
+  await page.getByRole("button", { name: "Diagnostics" }).click();
   await page.waitForTimeout(2_500);
   await page.screenshot({ path: "docs/trend-engine/screens/inspector-1440x900.png" });
 });

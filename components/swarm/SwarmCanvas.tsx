@@ -23,11 +23,11 @@ interface Preview {
   y: number;
 }
 
-const LIFE_KO: Record<string, string> = { rising: "떠오름", peak: "정점", fading: "식는 중" };
+const LIFE_LABEL: Record<string, string> = { rising: "Rising", peak: "Peaking", fading: "Cooling" };
 
 function ago(ms: number): string {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
-  return s < 60 ? `${s}초 전` : `${Math.round(s / 60)}분 전`;
+  return s < 60 ? `${s}s ago` : `${Math.round(s / 60)}m ago`;
 }
 
 export default function SwarmCanvas() {
@@ -106,8 +106,8 @@ export default function SwarmCanvas() {
         if (empty !== null) {
           empty.hidden = s.trend.events.length > 0;
           empty.textContent = s.trend.learning.active
-            ? `평소를 배우는 중입니다 — ${s.trend.learning.minutes}분 / 10분. 학습이 끝나면 평소보다 설명되지 않게 늘어나는 것이 여기 카드로 그려집니다.`
-            : "지금 많이 나오는 말을 모으는 중입니다. 몇 초 뒤 커서가 왼쪽 새 글에서 출발해 카드를 그립니다.";
+            ? `Learning the baseline — ${s.trend.learning.minutes} of 10 min. After that, anything rising faster than its usual level gets drawn here as a card.`
+            : "Collecting what people are saying right now. In a few seconds, cursors leave the live feed on the left and start drawing cards.";
         }
         hydrator?.want([...s.trend.spreading.map((p) => p.uri), ...s.trend.events.flatMap((e) => (e.postUri !== null ? [e.postUri] : []))]);
         // 열린 카드는 최신 값으로
@@ -143,36 +143,36 @@ export default function SwarmCanvas() {
   const ev = openId !== null ? openEv : null;
 
   return (
-    <section className="sw-canvas" aria-label="트렌드 캔버스">
-      <div className="sw-tabs" role="tablist" aria-label="보기">
+    <section className="sw-canvas" aria-label="Trend canvas">
+      <div className="sw-tabs" role="tablist" aria-label="View">
         <button type="button" role="tab" id="tab-events" aria-controls="panel-events" aria-selected={tab === "events"} onClick={() => setTab("events")}>
-          트렌드 카드
+          Trend cards
         </button>
         <button type="button" role="tab" id="tab-spreading" aria-controls="panel-spreading" aria-selected={tab === "spreading"} onClick={() => setTab("spreading")}>
-          반응 몰리는 글
+          Hot posts
         </button>
       </div>
 
       <div id="panel-events" role="tabpanel" aria-labelledby="tab-events" className="sw-viewport" ref={viewportRef} hidden={tab !== "events"}>
         <p className="sw-empty" ref={emptyRef}>
-          스트림에 연결하는 중입니다…
+          Connecting to the stream…
         </p>
         <div className="sw-board" ref={boardRef} onClick={() => setPreview(null)} />
         {preview !== null && (
           <div
             className="sw-preview"
             role="dialog"
-            aria-label="글 미리보기"
+            aria-label="Post preview"
             style={{ transform: `translate3d(${Math.round(preview.x + 14)}px, ${Math.round(preview.y + 14)}px, 0)`, borderColor: preview.color }}
             onClick={(e) => e.stopPropagation()}
           >
             <b style={{ background: preview.color }}>{preview.row.tag}</b>
-            <p>{preview.row.text || "(본문 없음)"}</p>
+            <p>{preview.row.text || "(no text)"}</p>
             <div className="sw-preview-meta">
               <span>{preview.row.did}</span>
               {preview.row.rkey !== "" && preview.row.fullDid !== "" && (
                 <a href={`https://bsky.app/profile/${preview.row.fullDid}/post/${preview.row.rkey}`} target="_blank" rel="noopener noreferrer">
-                  bsky.app에서 보기
+                  View on bsky.app
                 </a>
               )}
             </div>
@@ -183,57 +183,57 @@ export default function SwarmCanvas() {
       <HudPill />
 
       <div id="panel-spreading" role="tabpanel" aria-labelledby="tab-spreading" className="sw-spreading" hidden={tab !== "spreading"}>
-        <p className="sp-note">5분 안에 좋아요·리포스트가 몰리는 글 — 많이 몰리고 빨리 늘어나는 순</p>
-        <ol ref={spreadRef} aria-label="퍼지는 글 목록" />
+        <p className="sp-note">Posts drawing the most likes and reposts in the last 5 minutes, ranked by volume and growth</p>
+        <ol ref={spreadRef} aria-label="Hot posts" />
       </div>
 
       {ev !== null && <div className="sw-scrim" onClick={() => setOpenId(null)} aria-hidden />}
       {ev !== null && (
-        <aside className="sw-drawer" aria-label={`이벤트 상세: ${ev.title}`} style={{ ["--ev" as string]: cardColor(ev) }}>
+        <aside className="sw-drawer" aria-label={`Event details: ${ev.title}`} style={{ ["--ev" as string]: cardColor(ev) }}>
           <header>
             <span className="sw-drawer-kind">
-              {ev.state === "past" ? "지나간 트렌드" : ev.state === "watch" ? "관찰 중 · 아직 트렌드 판정 전" : `트렌드 · ${LIFE_KO[ev.lifecycle] ?? ev.lifecycle}`}
+              {ev.state === "past" ? "Past trend" : ev.state === "watch" ? "Watching · not a trend yet" : `Trend · ${LIFE_LABEL[ev.lifecycle] ?? ev.lifecycle}`}
             </span>
             <h2>{ev.title}</h2>
-            <button type="button" onClick={() => setOpenId(null)} aria-label="닫기">
+            <button type="button" onClick={() => setOpenId(null)} aria-label="Close">
               ×
             </button>
           </header>
           <dl className="sw-drawer-stats">
             <div>
-              <dt>평소 대비</dt>
+              <dt>Vs. usual</dt>
               <dd>
                 <span className="sw-num">×{ev.stats.mult >= 10 ? Math.round(ev.stats.mult) : ev.stats.mult.toFixed(1)}</span>
               </dd>
             </div>
             <div>
-              <dt>5분 작성자</dt>
+              <dt>Authors (5m)</dt>
               <dd>
-                <span className="sw-num">{ev.stats.u}</span>명
+                <span className="sw-num">{ev.stats.u}</span>
               </dd>
             </div>
             <div>
-              <dt>새로 합류</dt>
+              <dt>Newcomers</dt>
               <dd>
                 <span className="sw-num">{Math.round(ev.stats.newRatio * 100)}</span>%
               </dd>
             </div>
             <div>
-              <dt>점수</dt>
+              <dt>Score</dt>
               <dd>
                 <span className="sw-num">{ev.score.toFixed(1)}</span>
               </dd>
             </div>
             <div>
-              <dt>처음 잡힌 시각</dt>
+              <dt>First seen</dt>
               <dd>
                 <span className="sw-num">{new Date(ev.enteredAt).toTimeString().slice(0, 8)}</span>
               </dd>
             </div>
           </dl>
           <section>
-            <h3>최근 15분</h3>
-            <svg className="sw-drawer-spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-label="최근 15분 언급 추이">
+            <h3>Last 15 minutes</h3>
+            <svg className="sw-drawer-spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-label="Mentions over the last 15 minutes">
               <polyline
                 points={ev.spark
                   .map((v, i) => `${((i / Math.max(1, ev.spark.length - 1)) * 100).toFixed(1)},${(28 - (v / Math.max(1, ...ev.spark)) * 26).toFixed(1)}`)
@@ -242,21 +242,21 @@ export default function SwarmCanvas() {
             </svg>
             <div className="sw-drawer-axis">
               <span>
-                −<span className="sw-num">15</span>분
+                −<span className="sw-num">15</span>m
               </span>
-              <span>지금</span>
+              <span>now</span>
             </div>
           </section>
           <section>
             <h3>
-              대표 글 <span className="sw-drawer-count sw-num">{ev.representativePosts.length}</span>
+              Top posts <span className="sw-drawer-count sw-num">{ev.representativePosts.length}</span>
             </h3>
             {ev.representativePosts.length > 0 ? (
               <ul className="sw-drawer-posts">
                 {ev.representativePosts.map((p) => (
                   <li key={`${p.did}/${p.rkey}`}>
                     <a href={p.url} target="_blank" rel="noopener noreferrer">
-                      <p>{p.text || "(본문 없음)"}</p>
+                      <p>{p.text || "(no text)"}</p>
                       <span>{ago(p.timeMs)} · bsky.app</span>
                     </a>
                   </li>
@@ -270,7 +270,7 @@ export default function SwarmCanvas() {
           </section>
           {ev.related.length > 0 && (
             <section>
-              <h3>관련 단어</h3>
+              <h3>Related</h3>
               <ul className="sw-drawer-related">
                 {ev.related.map((r) => (
                   <li key={r}>{r}</li>
@@ -279,7 +279,7 @@ export default function SwarmCanvas() {
             </section>
           )}
           <section>
-            <h3>링크</h3>
+            <h3>Link</h3>
             {ev.link !== null ? (
               <a className="sw-drawer-link" href={`https://${ev.link.url}`} target="_blank" rel="noopener noreferrer">
                 {ev.link.url}
@@ -290,7 +290,7 @@ export default function SwarmCanvas() {
               </span>
             )}
           </section>
-          {ev.langs.length > 0 && <p className="sw-drawer-langs">언어 {ev.langs.join(" · ")}</p>}
+          {ev.langs.length > 0 && <p className="sw-drawer-langs">Languages {ev.langs.join(" · ")}</p>}
         </aside>
       )}
     </section>

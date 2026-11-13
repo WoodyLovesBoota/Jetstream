@@ -12,17 +12,17 @@ import { subscribeRoster } from "./rosterBus";
 function connLabel(state: string, attempt: number): string {
   switch (state) {
     case "live":
-      return "수신 중";
+      return "Live";
     case "replaying":
-      return "되감는 중";
+      return "Replaying";
     case "connecting":
-      return "연결 중";
+      return "Connecting";
     case "reconnecting":
-      return `재연결 중 ${attempt}`;
+      return `Reconnecting ${attempt}`;
     case "failed":
-      return `연결 실패 ${attempt}`;
+      return `Failed ${attempt}`;
     default:
-      return "연결 끊김";
+      return "Closed";
   }
 }
 
@@ -71,26 +71,26 @@ export default function Toolbar({ panelOpen, onTogglePanel }: { panelOpen: boole
           <span className="tb-instance">{conn.instance}</span>
         </span>
         {/* 수신 범위 — 지금 고른 쪽이 켜진 2칸 전환(버튼 글자가 상태인지 동작인지 헷갈리지 않게) */}
-        <div className="tb-seg tb-hide-narrow" role="radiogroup" aria-label="수신 범위" data-filter={conn.filter}>
+        <div className="tb-seg tb-hide-narrow" role="radiogroup" aria-label="Stream scope" data-filter={conn.filter}>
           <button
             type="button"
             role="radio"
             aria-checked={!full}
             onClick={() => setFilterMode("filtered")}
-            title="글·좋아요·리포스트·팔로우만(app.bsky.feed.* + app.bsky.graph.follow)"
+            title="Posts, likes, reposts and follows only (app.bsky.feed.* + app.bsky.graph.follow)"
           >
-            주요
+            Core
           </button>
-          <button type="button" role="radio" aria-checked={full} onClick={() => setFilterMode("full")} title="필터 없음 — 모든 컬렉션">
-            전체
+          <button type="button" role="radio" aria-checked={full} onClick={() => setFilterMode("full")} title="No filter — every collection">
+            All
           </button>
         </div>
-        <button type="button" className="tb-btn" data-paused={paused} aria-pressed={paused} onClick={toggleRenderPause} title="렌더만 정지 — 워커는 계속 집계한다">
-          {paused ? "재개" : "일시정지"}
+        <button type="button" className="tb-btn" data-paused={paused} aria-pressed={paused} onClick={toggleRenderPause} title="Pauses rendering only — the worker keeps counting">
+          {paused ? "Resume" : "Pause"}
         </button>
-        <div className="tb-stack" ref={stackRef} aria-label="지금 화면의 커서" />
-        <button type="button" className="tb-btn tb-hide-narrow" aria-pressed={panelOpen} aria-controls="inspector" onClick={onTogglePanel} title="진단 패널(Pulse·Mix·Tape·HUD)">
-          진단
+        <div className="tb-stack" ref={stackRef} aria-label="Cursors on screen" />
+        <button type="button" className="tb-btn tb-hide-narrow" aria-pressed={panelOpen} aria-controls="inspector" onClick={onTogglePanel} title="Diagnostics panel (Pulse, Mix, Tape, HUD)">
+          Diagnostics
         </button>
       </div>
     </header>

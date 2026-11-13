@@ -30,19 +30,19 @@ const plexSansKR = IBM_Plex_Sans_KR({
 // og:image·canonical 같은 URL 필드는 배포 도메인이 정해지면 metadataBase와 함께 추가한다
 export const metadata: Metadata = {
   title: "Jetstream Trends",
-  description: "Bluesky에서 지금 평소와 다르게 퍼지는 것 — 실시간 트렌드 스웜",
+  description: "What is spreading on Bluesky right now, faster than usual — a live trend swarm",
   openGraph: {
     title: "Jetstream Deck",
     description:
-      "Bluesky Jetstream(공개 WebSocket 파이어호스)을 브라우저에서 직접 구독하는 실시간 대시보드",
+      "A live dashboard that subscribes to the Bluesky Jetstream firehose (a public WebSocket) directly from the browser",
     type: "website",
     siteName: "Jetstream Deck",
-    locale: "ko_KR",
+    locale: "en_US",
   },
   twitter: {
     card: "summary",
     title: "Jetstream Deck",
-    description: "Bluesky Jetstream 파이어호스 실시간 대시보드",
+    description: "A live dashboard for the Bluesky Jetstream firehose",
   },
 };
 
@@ -57,7 +57,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ko" className={`${sans.variable} ${mono.variable} ${plexSansKR.variable}`}>
+    <html lang="en" className={`${sans.variable} ${mono.variable} ${plexSansKR.variable}`}>
       <body>{children}</body>
     </html>
   );
