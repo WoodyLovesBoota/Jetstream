@@ -51,10 +51,12 @@ function primaryLang(langs: string[] | undefined): string {
 }
 
 /** 최근 글 5개 중 4개 이상이 (URL·숫자·멘션 뺀) 같은 문장이면 복붙 */
-function isCopypasta(recent: readonly RecentPost[]): boolean {
+export function isCopypasta(recent: readonly RecentPost[]): boolean {
   if (recent.length < 4) return false;
   const counts = new Map<string, number>();
   for (const p of recent) {
+    // 링크 카드 제목은 같은 기사를 올린 모두에게 똑같다 — 복붙의 증거가 아니다
+    if (p.fromEmbed === true) continue;
     const norm = p.text
       .toLowerCase()
       .replace(/https?:\/\/\S+|@[\w.-]+|\d+/g, "")
@@ -134,8 +136,16 @@ export interface EngineOptions {
 
 /** 화면에 보일 글 문구 — 본문, 본문이 비면 embed 요약(링크 카드 제목·이미지 alt). 140자 */
 function displayText(ev: SlimEvent): string {
-  const x = ev.x ?? "";
-  return (x.trim() !== "" ? x : (ev.e ?? "")).slice(0, 140);
+  return (embedOnly(ev) ? (ev.e ?? "") : (ev.x ?? "")).slice(0, 140);
+}
+
+/** 본문이 비어 화면 문구를 embed 요약으로 채운 글인가 — 이런 글의 문구는 작성자가 쓴 말이 아니다 */
+function embedOnly(ev: SlimEvent): boolean {
+  return (ev.x ?? "").trim() === "";
+}
+/** 최근 글 → 카드 대표 글(bsky.app 링크 포함) */
+function toTrendPost(p: RecentPost): TrendPost {
+  return { did: p.did, rkey: p.rkey, text: p.text, timeMs: p.timeMs, url: `https://bsky.app/profile/${p.did}/post/${p.rkey}`, langs: p.langs };
 }
 export class TrendEngine {
   readonly cfg: TrendConfig;
@@ -391,7 +401,7 @@ export class TrendEngine {
     let links: string[] | null = null;
     if (isPost && ev.k !== undefined) {
       links = this.linksOf(keys);
-      recent = { did: ev.d, rkey: ev.k, text: displayText(ev), timeMs: tMs, langs: ev.g ?? [], links };
+      recent = { did: ev.d, rkey: ev.k, text: displayText(ev), fromEmbed: embedOnly(ev), timeMs: tMs, langs: ev.g ?? [], links };
       idHash = postIdHash(ev.d, ev.k);
       if (this.postTexts.size >= POST_TEXT_CAP) {
         const first = this.postTexts.keys().next();
@@ -432,6 +442,7 @@ export class TrendEngine {
             did: ev.d,
             rkey: ev.k ?? "",
             text: displayText(ev),
+            fromEmbed: embedOnly(ev),
             timeMs: tMs,
             langs: ev.g ?? [],
             links,
@@ -453,7 +464,7 @@ export class TrendEngine {
         if (h === undefined) continue;
         h.noteAuthor(didHash, minute);
         h.notePost(
-          recent ?? { did: ev.d, rkey: ev.k ?? "", text: displayText(ev), timeMs: tMs, langs: ev.g ?? [], links: this.linksOf(keys) },
+          recent ?? { did: ev.d, rkey: ev.k ?? "", text: displayText(ev), fromEmbed: embedOnly(ev), timeMs: tMs, langs: ev.g ?? [], links: this.linksOf(keys) },
           postIdHash(ev.d, ev.k ?? String(ev.t)),
         );
       }
@@ -757,10 +768,14 @@ export class TrendEngine {
 
     // 참여 대상 p:
     const engSlots = this.engage.top(ENGAGE_EVAL_TOP, minute, c.engageShortMin);
+    const engSlotSet = new Set(engSlots);
     for (const [key, st] of this.cand) {
       if (st.state === "active" && key.startsWith("p:")) {
         const s = this.engage.slotOf(key);
-        if (s >= 0 && !engSlots.includes(s)) engSlots.push(s);
+        if (s >= 0 && !engSlotSet.has(s)) {
+          engSlotSet.add(s);
+          engSlots.push(s);
+        }
       }
     }
     const spreading: SpreadingPost[] = [];
@@ -795,7 +810,8 @@ export class TrendEngine {
       }
     }
     // p: 핫 집합 갱신
-    for (const k of [...this.hotEngage.keys()]) if (!engageHotNext.includes(k) && this.cand.get(k)?.state !== "active") this.hotEngage.delete(k);
+    const engageHotSet = new Set(engageHotNext);
+    for (const k of [...this.hotEngage.keys()]) if (!engageHotSet.has(k) && this.cand.get(k)?.state !== "active") this.hotEngage.delete(k);
     for (const k of engageHotNext) {
       if (!this.hotEngage.has(k)) this.hotEngage.set(k, new HotInfo(nowMs, 500, c.hotRecentPosts, c.hotPostIdCap, c.hotLinkSlots));
     }
@@ -1194,109 +1210,12 @@ export class TrendEngine {
     const rank: Record<CandidateKind, number> = { h: 0, b: 1, c: 2, w: 3, u: 4, d: 5, q: 6, p: 7 };
     const titleMember = [...members].sort((x, y) => rank[x.kind] - rank[y.kind] || y.score - x.score)[0];
 
-    // 대표 글
-    const seen = new Map<string, { post: RecentPost; count: number }>();
-    for (const k of keys) {
-      const h = this.infoOf(k);
-      if (h === undefined) continue;
-      for (const p of h.recent) {
-        const id2 = `${p.did}/${p.rkey}`;
-        const cur = seen.get(id2);
-        if (cur === undefined) seen.set(id2, { post: p, count: 1 });
-        else cur.count++;
-      }
-    }
-    const all = [...seen.values()];
-    const multi = all.filter((x) => x.count >= 2 && x.post.rkey !== "");
-    // 여러 멤버에 걸친 글(참여 많은 순)을 먼저, 모자라면 최근 글로 채운다 — 작성자당 1개, 최대 REP_POSTS개
-    const reps: RecentPost[] = [];
-    const authors = new Set<string>();
-    const take = (p: RecentPost): void => {
-      if (reps.length >= REP_POSTS || authors.has(p.did)) return;
-      authors.add(p.did);
-      reps.push(p);
-    };
-    if (multi.length > 0) {
-      const eng = (p: RecentPost): number => {
-        const s = this.engage.slotOf(`p:${postUri(p.did, p.rkey)}`);
-        return s >= 0 ? this.engage.stats(s, minute, c.engageShortMin).p5 : 0;
-      };
-      for (const x of multi.sort((x, y) => eng(y.post) - eng(x.post) || y.post.timeMs - x.post.timeMs)) take(x.post);
-    }
-    for (const x of all.filter((x) => x.post.rkey !== "").sort((p, q) => q.post.timeMs - p.post.timeMs)) take(x.post);
-    const representativePosts: TrendPost[] = reps.map((p) => ({
-      did: p.did,
-      rkey: p.rkey,
-      text: p.text,
-      timeMs: p.timeMs,
-      url: `https://bsky.app/profile/${p.did}/post/${p.rkey}`,
-      langs: p.langs,
-    }));
-
-    // 링크: u: 멤버, 아니면 멤버 최근 글의 30% 이상이 같은 URL
-    let link: TrendEvent["link"] = null;
-    const uMember = members.find((m) => m.kind === "u");
-    if (uMember !== undefined) {
-      const n = normalizeUrl(`https://${uMember.key.slice(2)}`);
-      if (n !== null) link = n;
-    }
-    if (link === null) {
-      for (const k of keys) {
-        const tl = this.infoOf(k)?.topLink();
-        if (tl !== null && tl !== undefined && tl.frac >= c.linkAttachFrac) {
-          const n = normalizeUrl(`https://${tl.url}`);
-          if (n !== null) {
-            link = n;
-            break;
-          }
-        }
-      }
-    }
-
-    // 관련 단어: 다른 멤버 + 멤버 글에 자주 함께 나온 단어 상위 3
-    const memberWords = new Set(members.flatMap((m) => m.label.toLowerCase().split(/[ ·|#]+/)));
-    const freq = new Map<string, number>();
-    const buf: (string | null)[] = [];
-    for (const { post } of all) {
-      wordStream(post.text, post.langs, buf);
-      const uniq = new Set(buf.filter((w): w is string => w !== null && !memberWords.has(w) && !this.background.has(w)));
-      for (const w of uniq) freq.set(w, (freq.get(w) ?? 0) + 1);
-    }
-    const coWords = [...freq.entries()]
-      .filter(([, n]) => n >= 2)
-      .sort((x, y) => y[1] - x[1])
-      .slice(0, 3)
-      .map(([w]) => w);
-    // 링크·글 멤버는 링크 칸·제목이 따로 보여 주므로 관련 단어에서 뺀다
-    const relatedLabels = members.filter((m) => m !== titleMember && m.kind !== "u" && m.kind !== "d" && m.kind !== "p" && m.kind !== "q").map((m) => m.label);
-    const related = [...new Set([...relatedLabels, ...coWords])].slice(0, c.relatedMax + 3);
-
-    // 언어
-    const langCount = new Map<string, number>();
-    for (const k of keys) {
-      const h = this.infoOf(k);
-      if (h === undefined) continue;
-      for (const [l, v] of h.langs) langCount.set(l, (langCount.get(l) ?? 0) + v);
-    }
-    const langs = [...langCount.entries()].filter(([l]) => l !== "und").sort((x, y) => y[1] - x[1]).slice(0, 2).map(([l]) => l);
-
-    // 스파크라인 — 최고 점수 멤버
-    let spark: number[] = [];
-    const topKey = keys[0];
-    const tslot = this.tracked.slotOf(topKey);
-    if (tslot >= 0) {
-      this.tracked.spark(tslot, bNow, c.buckets, 30, this.spk);
-      spark = this.spk.slice();
-    } else if (topKey.startsWith("p:")) {
-      const s = this.engage.slotOf(topKey);
-      if (s >= 0) {
-        // p:는 분 해상도 — 15분을 30포인트로(포인트당 30초, 분 값을 반씩)
-        for (let m = minute - 14; m <= minute; m++) {
-          const st = this.engage.stats(s, m, 1).p5 / 2;
-          spark.push(st, st);
-        }
-      }
-    }
+    const all = this.memberPosts(keys);
+    const representativePosts = this.pickRepPosts(all, minute);
+    const link = this.attachLink(members, keys);
+    const related = this.relatedWords(members, titleMember, all);
+    const langs = this.cardLangs(keys);
+    const spark = this.sparkFor(keys[0], bNow, minute);
 
     const titleKind = titleMember.kind;
     const pUri = titleKind === "p" || titleKind === "q" ? titleMember.key.slice(2) : null;
@@ -1306,14 +1225,7 @@ export class TrendEngine {
       const known = this.postTexts.get(pUri);
       title = known?.text.slice(0, 80) || postTitlePlaceholder(pUri);
       if (known !== undefined && !representativePosts.some((p) => p.rkey === known.rkey && p.did === known.did)) {
-        representativePosts.unshift({
-          did: known.did,
-          rkey: known.rkey,
-          text: known.text,
-          timeMs: known.timeMs,
-          url: `https://bsky.app/profile/${known.did}/post/${known.rkey}`,
-          langs: known.langs,
-        });
+        representativePosts.unshift(toTrendPost(known));
         representativePosts.length = Math.min(representativePosts.length, REP_POSTS);
       }
     } else if (titleKind === "u") {
@@ -1351,6 +1263,114 @@ export class TrendEngine {
       repostReach: prev?.repostReach ?? null,
       rankScore: top?.res.score ?? 0,
     };
+  }
+
+  /** 멤버들의 최근 글을 글 단위로 모은다 — count = 그 글이 실린 멤버 수 */
+  private memberPosts(keys: readonly string[]): { post: RecentPost; count: number }[] {
+    const seen = new Map<string, { post: RecentPost; count: number }>();
+    for (const k of keys) {
+      const h = this.infoOf(k);
+      if (h === undefined) continue;
+      for (const p of h.recent) {
+        const id2 = `${p.did}/${p.rkey}`;
+        const cur = seen.get(id2);
+        if (cur === undefined) seen.set(id2, { post: p, count: 1 });
+        else cur.count++;
+      }
+    }
+    return [...seen.values()];
+  }
+
+  /** 대표 글 — 여러 멤버에 걸친 글(참여 많은 순)을 먼저, 모자라면 최근 글로 채운다. 작성자당 1개, 최대 REP_POSTS개 */
+  private pickRepPosts(all: readonly { post: RecentPost; count: number }[], minute: number): TrendPost[] {
+    const c = this.cfg;
+    const multi = all.filter((x) => x.count >= 2 && x.post.rkey !== "");
+    const reps: RecentPost[] = [];
+    const authors = new Set<string>();
+    const take = (p: RecentPost): void => {
+      if (reps.length >= REP_POSTS || authors.has(p.did)) return;
+      authors.add(p.did);
+      reps.push(p);
+    };
+    if (multi.length > 0) {
+      const eng = (p: RecentPost): number => {
+        const s = this.engage.slotOf(`p:${postUri(p.did, p.rkey)}`);
+        return s >= 0 ? this.engage.stats(s, minute, c.engageShortMin).p5 : 0;
+      };
+      for (const x of multi.sort((x, y) => eng(y.post) - eng(x.post) || y.post.timeMs - x.post.timeMs)) take(x.post);
+    }
+    for (const x of all.filter((x) => x.post.rkey !== "").sort((p, q) => q.post.timeMs - p.post.timeMs)) take(x.post);
+    return reps.map(toTrendPost);
+  }
+
+  /** 링크: u: 멤버, 아니면 멤버 최근 글의 linkAttachFrac 이상이 같은 URL */
+  private attachLink(members: readonly TrendMember[], keys: readonly string[]): TrendEvent["link"] {
+    const uMember = members.find((m) => m.kind === "u");
+    if (uMember !== undefined) {
+      const n = normalizeUrl(`https://${uMember.key.slice(2)}`);
+      if (n !== null) return n;
+    }
+    for (const k of keys) {
+      const tl = this.infoOf(k)?.topLink();
+      if (tl !== null && tl !== undefined && tl.frac >= this.cfg.linkAttachFrac) {
+        const n = normalizeUrl(`https://${tl.url}`);
+        if (n !== null) return n;
+      }
+    }
+    return null;
+  }
+
+  /** 관련 단어: 다른 멤버 + 멤버 글에 자주 함께 나온 단어 상위 3 */
+  private relatedWords(members: readonly TrendMember[], titleMember: TrendMember, all: readonly { post: RecentPost }[]): string[] {
+    const memberWords = new Set(members.flatMap((m) => m.label.toLowerCase().split(/[ ·|#]+/)));
+    const freq = new Map<string, number>();
+    const buf: (string | null)[] = [];
+    for (const { post } of all) {
+      if (post.fromEmbed === true) continue; // embed 요약은 표시용일 뿐 추출·공출현에 쓰지 않는다
+      wordStream(post.text, post.langs, buf);
+      const uniq = new Set(buf.filter((w): w is string => w !== null && !memberWords.has(w) && !this.background.has(w)));
+      for (const w of uniq) freq.set(w, (freq.get(w) ?? 0) + 1);
+    }
+    const coWords = [...freq.entries()]
+      .filter(([, n]) => n >= 2)
+      .sort((x, y) => y[1] - x[1])
+      .slice(0, 3)
+      .map(([w]) => w);
+    // 링크·글 멤버는 링크 칸·제목이 따로 보여 주므로 관련 단어에서 뺀다
+    const relatedLabels = members.filter((m) => m !== titleMember && m.kind !== "u" && m.kind !== "d" && m.kind !== "p" && m.kind !== "q").map((m) => m.label);
+    return [...new Set([...relatedLabels, ...coWords])].slice(0, this.cfg.relatedMax + 3);
+  }
+
+  /** 카드 언어 — 멤버 언어 집계 합의 상위 2(und 제외) */
+  private cardLangs(keys: readonly string[]): string[] {
+    const langCount = new Map<string, number>();
+    for (const k of keys) {
+      const h = this.infoOf(k);
+      if (h === undefined) continue;
+      for (const [l, v] of h.langs) langCount.set(l, (langCount.get(l) ?? 0) + v);
+    }
+    return [...langCount.entries()].filter(([l]) => l !== "und").sort((x, y) => y[1] - x[1]).slice(0, 2).map(([l]) => l);
+  }
+
+  /** 스파크라인 30포인트 — 최고 점수 멤버 */
+  private sparkFor(topKey: string, bNow: number, minute: number): number[] {
+    const tslot = this.tracked.slotOf(topKey);
+    if (tslot >= 0) {
+      this.tracked.spark(tslot, bNow, this.cfg.buckets, 30, this.spk);
+      return this.spk.slice();
+    }
+    const spark: number[] = [];
+    if (topKey.startsWith("p:")) {
+      const s = this.engage.slotOf(topKey);
+      if (s >= 0) {
+        // p:는 분 해상도 — 15분을 30포인트로(포인트당 30초, 분 값을 반씩)
+        for (let m = minute - 14; m <= minute; m++) {
+          const st = this.engage.stats(s, m, 1).p5 / 2;
+          spark.push(st, st);
+        }
+      }
+    }
+    return spark;
   }
 
   /** 후보 키들 → 소속 이벤트(진입 멤버 기준). 스웜 커서의 목적지 */

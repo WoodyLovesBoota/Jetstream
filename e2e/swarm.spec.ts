@@ -128,6 +128,36 @@ test("카드를 누르면 상세 서랍 — 대표 글·관련·링크", async (
   await expect(drawer).toHaveCount(0);
 });
 
+test("상세 서랍 포커스 — 열면 닫기 버튼, 닫으면 카드로 돌아온다", async ({ page }) => {
+  await page.goto(URL);
+  const jury = page.locator(".sw-card", { has: page.locator(".sw-title", { hasText: "jury verdict" }) });
+  await expect(jury).toHaveAttribute("data-built", "true", { timeout: 20_000 });
+  await jury.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: /jury verdict/ });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Close" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(jury).toBeFocused();
+});
+
+test("탭 — 화살표로 이동, 카드 탭이 아니면 스웜 커서 레이어를 감추고 돌아오면 다시 보인다", async ({ page }) => {
+  await page.goto(URL);
+  await expect(builtTrendCards(page).first()).toBeVisible({ timeout: 20_000 });
+  const layer = page.locator(".sw-layer");
+  await expect(layer).toBeVisible();
+  await page.getByRole("tab", { name: "Trend cards" }).focus();
+  await page.keyboard.press("ArrowRight");
+  const hot = page.getByRole("tab", { name: "Hot posts" });
+  await expect(hot).toBeFocused();
+  await expect(hot).toHaveAttribute("aria-selected", "true");
+  await expect(layer).toBeHidden();
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.getByRole("tab", { name: "Trend cards" })).toHaveAttribute("aria-selected", "true");
+  await expect(layer).toBeVisible();
+});
+
 test("퍼지는 글 탭 — 좋아요가 몰리는 글", async ({ page }) => {
   await page.goto(URL);
   await page.getByRole("tab", { name: "Hot posts" }).click();

@@ -65,15 +65,21 @@ export default function Toolbar({ panelOpen, onTogglePanel }: { panelOpen: boole
   }, []);
 
   useEffect(() => {
+    // 2Hz로 오는 명단이 대개 그대로다 — 보이는 내용이 같으면 노드를 새로 만들지 않는다
+    let lastSig = "";
     return subscribeRoster((list, total) => {
       const el = stackRef.current;
       if (el === null) return;
       const shown = list.slice(0, 6);
+      const ink = tagInk();
+      const sig = `${total}|${ink}|${shown.map((r) => `${r.color} ${r.tag}`).join("|")}`;
+      if (sig === lastSig) return;
+      lastSig = sig;
       const nodes: HTMLElement[] = shown.map((r) => {
         const s = document.createElement("span");
         s.className = "tb-avatar";
         s.style.background = r.color;
-        s.style.color = tagInk();
+        s.style.color = ink;
         s.textContent = (r.tag.replace(/^[#@]/, "")[0] ?? "?").toUpperCase();
         s.title = r.tag;
         return s;
@@ -136,7 +142,7 @@ export default function Toolbar({ panelOpen, onTogglePanel }: { panelOpen: boole
         <button type="button" className="tb-btn" data-paused={paused} aria-pressed={paused} onClick={toggleRenderPause} title="Pauses rendering only — the worker keeps counting">
           {paused ? "Resume" : "Pause"}
         </button>
-        <div className="tb-stack" ref={stackRef} aria-label="Cursors on screen" />
+        <div className="tb-stack" ref={stackRef} role="group" aria-label="Cursors on screen" />
         <button type="button" className="tb-btn tb-hide-narrow" aria-pressed={panelOpen} aria-controls="inspector" onClick={onTogglePanel} title="Diagnostics panel (Pulse, Mix, Tape, HUD)">
           Diagnostics
         </button>

@@ -1,7 +1,8 @@
 // M6 — 이벤트 카드 모델: 제목 우선순위, 대표 글, 링크 부착, 언어, ID 승계, 지나간 트렌드, 상한.
 
 import { describe, expect, it } from "vitest";
-import { TrendEngine } from "./engine.ts";
+import { isCopypasta, TrendEngine } from "./engine.ts";
+import type { RecentPost } from "./hot.ts";
 import type { Prior } from "./prior.ts";
 import { synthStream, type SynthOptions } from "./synth.ts";
 import type { TrendSnapshot } from "./types.ts";
@@ -252,5 +253,27 @@ describe("언어 필터", () => {
     expect(s !== null && has(s, "h:eclipse2026")).toBe(true);
     engine.setLangFilter(null);
     expect(engine.tick((last?.ts ?? 0) + 2)?.lang).toBeNull();
+  });
+});
+
+describe("복붙 판정", () => {
+  const post = (i: number, text: string, fromEmbed?: boolean): RecentPost => ({
+    did: `did:plc:a${i}`,
+    rkey: `r${i}`,
+    text,
+    fromEmbed,
+    timeMs: i,
+    langs: ["en"],
+    links: [],
+  });
+
+  it("서로 다른 작성자가 같은 문장을 4번 넘게 올리면 복붙이다", () => {
+    const same = "follow back everyone who likes this post today";
+    expect(isCopypasta([0, 1, 2, 3, 4].map((i) => post(i, same)))).toBe(true);
+  });
+
+  it("본문 없이 같은 기사 링크만 올린 글(embed 제목)은 복붙으로 치지 않는다", () => {
+    const title = "Supreme Court rules on landmark climate case";
+    expect(isCopypasta([0, 1, 2, 3, 4].map((i) => post(i, title, true)))).toBe(false);
   });
 });

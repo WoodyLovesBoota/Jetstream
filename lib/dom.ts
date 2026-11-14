@@ -1,12 +1,8 @@
-// 메인 스레드 DOM 직접 갱신 헬퍼 — rAF 루프가 textContent·dataset·속성을 만지는
+// 메인 스레드 DOM 직접 갱신 헬퍼 — rAF 루프가 textContent·속성을 만지는
 // 패널들이 공유한다. 같은 값 재대입을 막는 변경 가드를 한 곳에 두는 것이 전부다.
 
 export function setText(el: HTMLElement, text: string): void {
   if (el.textContent !== text) el.textContent = text;
-}
-
-export function setData(el: HTMLElement, key: string, value: string): void {
-  if (el.dataset[key] !== value) el.dataset[key] = value;
 }
 
 export function setAttr(el: HTMLElement, name: string, value: string): void {

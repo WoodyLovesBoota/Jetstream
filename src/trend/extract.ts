@@ -32,11 +32,6 @@ export function labelOf(key: string): string {
   }
 }
 
-/** 링크·글처럼 베이스라인≈0이라 z 대신 수렴 z'를 쓰는 종류 */
-export function isConvergent(kind: CandidateKind): boolean {
-  return kind === "u" || kind === "q" || kind === "p";
-}
-
 const URL_RE = /https?:\/\/\S+/gi;
 const BARE_DOMAIN_RE = /\b(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|co|io|news|app|social|gov|edu|uk|de|jp|kr|be|ly|it|me|tv|gg|ca|au|fr|es|br|in|ru|nl|us|info|xyz|link|site|online|digital|shop|store|blog|page|dev|ai)(?:\/\S*)?/gi;
 
@@ -230,13 +225,13 @@ export function extractKeys(ev: SlimEvent, opt: ExtractOptions, out: string[], w
   if (ev.q !== undefined) add(`q:${ev.q}`);
 }
 
-/** at://did/app.bsky.feed.post/rkey → bsky.app 링크. 형식이 다르면 null */
 /** at://{did}/app.bsky.feed.post/{rkey} → {did, rkey}. 글이 아니면 null */
 export function parsePostUri(uri: string): { did: string; rkey: string } | null {
   const m = /^at:\/\/([^/]+)\/app\.bsky\.feed\.post\/([^/]+)$/.exec(uri);
   return m === null ? null : { did: m[1], rkey: m[2] };
 }
 
+/** at://did/app.bsky.feed.post/rkey → bsky.app 링크. 형식이 다르면 null */
 export function bskyUrl(uri: string): string | null {
   const p = parsePostUri(uri);
   return p === null ? null : `https://bsky.app/profile/${p.did}/post/${p.rkey}`;

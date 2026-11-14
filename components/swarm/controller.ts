@@ -34,7 +34,7 @@ import {
   type Pt,
 } from "@/lib/swarm/motion";
 import { cardColor, ICONS, IDLE_COLOR, tagInk, wanderColor, type Shape } from "./cursors";
-import { fmtMult, KIND_LABEL, stateLabel } from "./labels";
+import { fmtMult, KIND_LABEL, oneLine, sparkPoints, stateLabel } from "./labels";
 
 export const MAX_CURSORS = 150;
 const RING_POOL = 16;
@@ -247,6 +247,11 @@ export class SwarmController {
     this.paused = p;
   }
 
+  /** 커서 레이어를 감춘다 — 카드 탭이 아닐 때 멈춘 커서가 다른 탭 위에 얼어붙어 보이지 않게 */
+  setLayerHidden(hidden: boolean): void {
+    this.layerHost.style.visibility = hidden ? "hidden" : "";
+  }
+
   private measure(): void {
     this.width = this.viewport.clientWidth;
     this.viewH = this.viewport.clientHeight;
@@ -397,6 +402,8 @@ export class SwarmController {
       const usable = card !== undefined && card.built && isLive(card.ev) && card.rect !== null;
       // 식는 이벤트는 도착이 절반으로 준다
       if (usable && card.ev.lifecycle === "fading" && Math.random() < 0.5) continue;
+      // 무소속 글은 일부만 띄운다 — 띄울지 먼저 정해야 버릴 커서의 원점을 재지 않는다
+      if (!usable && Math.random() > 0.45) continue;
       const c = this.spawnAt(this.edgePoint());
       if (c === null) return;
       c.row = row;
@@ -416,11 +423,7 @@ export class SwarmController {
         this.travel(c, this.orbitPoint(c, card), speed, "orbit");
       } else {
         // 무소속 글 — 실제 표본 글이지만 아직 어느 카드에도 속하지 않아 갈 곳이 없다.
-        // 일부만, 흐리게 떠돌다 나간다(이벤트 커서가 주인공)
-        if (Math.random() > 0.45) {
-          this.release(c);
-          continue;
-        }
+        // 일부만(위에서 골랐다), 흐리게 떠돌다 나간다(이벤트 커서가 주인공)
         this.setLook(c, wanderColor(), row.tag, "arrow");
         c.el.dataset.idle = "true";
         c.eventId = null;
@@ -656,11 +659,7 @@ export class SwarmController {
     // 타이핑 대상 = 렌더할 노드의 글자 그대로 — 두 벌로 만들면 타이핑과 최종 문장이 어긋난다
     const metaText = nodes.map((n) => (typeof n === "string" ? n : n.textContent)).join("");
     this.setField(card, "meta", metaText, () => card.meta.replaceChildren(...nodes));
-    const max = Math.max(1, ...ev.spark);
-    card.spark.setAttribute(
-      "points",
-      ev.spark.map((v, i) => `${((i / Math.max(1, ev.spark.length - 1)) * 100).toFixed(1)},${(22 - (v / max) * 20).toFixed(1)}`).join(" "),
-    );
+    card.spark.setAttribute("points", sparkPoints(ev.spark, 100, 22, 20));
     const rel = ev.related.slice(0, 4);
     this.setField(card, "related", rel.join("   "), () => {
       card.related.replaceChildren(
@@ -673,7 +672,7 @@ export class SwarmController {
     });
     card.link.textContent = ev.link?.domain ?? "";
     const q = ev.representativePosts[0]?.text ?? "";
-    const quote = q.length > 0 ? `“${q.replace(/\s+/g, " ").trim()}”` : "";
+    const quote = q.length > 0 ? `“${oneLine(q)}”` : "";
     this.setField(card, "quote", quote, () => {
       card.quote.textContent = quote;
     });

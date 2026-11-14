@@ -28,7 +28,7 @@ description: Jetstream Deck 변경을 실제 브라우저에서 구동해 검증
 - dev 전용 전역 핸들: `globalThis.__jetstream` = 최신 `StreamSnapshot`
   (`{ ts, buckets[300], counters: { recvTotal, recvPerSec, procTotal, procPerSec, dropTotal, dropPerSec, parseErrors }, wsState }`) —
   `lib/jetstream/useStreamWorker.ts`의 dev 블록이 제공. (P1의 1Hz 콘솔 로그는 P2에서 제거됨)
-- HUD(P2, R1에서 플로팅 → 우측 컬럼 하단 고정): `aside[aria-label="diagnostics"]`의
+- HUD(P2, R1에서 플로팅 → 우측 컬럼 하단 고정): `#inspector [data-hud]`의
   `dd` 노드들 — 순서대로
   recv/s, proc/s, drop/s, **cols 10s**, tracked(트렌드 추적 후보/상한), evict, bots(뮤트 DID), snap(ms), frame p95(ms), ws(=`dd`[9]).
   HUD는 진단 패널(`#inspector`, 기본 접힘) 안에 있다. Pulse·Tape·Mix는 왼쪽 데이터 레일(`.rail`, 항상 보임)에 있다.
@@ -93,7 +93,7 @@ description: Jetstream Deck 변경을 실제 브라우저에서 구동해 검증
 - 백프레셔 3단계(P8): `globalThis.__jetstream.backpressure` =
   `{degraded, m, loadPct, lagMs, costUs, stalling}`(`loadPct`는 **예산 대비** —
   100%가 진입선이고 `M = ⌈loadPct/100⌉`), `.counters.degradedSkipped`(파싱 전 탈락 누적,
-  `dropTotal`에 합산됨). HUD 루트(`aside[aria-label="diagnostics"]`)에
+  `dropTotal`에 합산됨). HUD 루트(`#inspector [data-hud]`)에
   `data-degraded` / `data-m` / `data-paused` / `data-buffered`가 붙고, 배너는
   `[data-kind="degraded"]` / `[data-kind="paused"]`의 `hidden` 여부로 본다.
   - **degraded 재현:** `__jetstreamDebug.stall(perFrameUs, durationMs)` — 프레임당 CPU를

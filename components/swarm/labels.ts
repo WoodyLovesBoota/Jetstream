@@ -49,3 +49,16 @@ export const LANG_OPTIONS: readonly { code: string; name: string }[] = [
 export function langName(code: string): string {
   return LANG_OPTIONS.find((o) => o.code === code)?.name ?? code;
 }
+
+/** 줄바꿈·연속 공백을 한 칸으로 — 카드 인용·제목처럼 한 줄로 보여 줄 글 */
+export const oneLine = (s: string): string => s.replace(/\s+/g, " ").trim();
+
+/**
+ * 스파크라인 polyline points — 가로 0..width, 세로는 base에서 위로 최대 height.
+ * 최댓값을 한 번만 구한다(점마다 다시 구하면 O(n²)).
+ */
+export function sparkPoints(spark: readonly number[], width: number, base: number, height: number): string {
+  const max = Math.max(1, ...spark);
+  const span = Math.max(1, spark.length - 1);
+  return spark.map((v, i) => `${((i / span) * width).toFixed(1)},${(base - (v / max) * height).toFixed(1)}`).join(" ");
+}

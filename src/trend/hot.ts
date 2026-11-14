@@ -10,6 +10,8 @@ export interface RecentPost {
   did: string;
   rkey: string;
   text: string;
+  /** text가 본문이 아니라 embed 요약(링크 카드 제목·이미지 alt)으로 채워졌다 */
+  fromEmbed?: boolean;
   timeMs: number;
   langs: string[];
   links: string[];
@@ -49,6 +51,8 @@ export class HotInfo {
   private readonly recentCap: number;
   private readonly postIdCap: number;
   private readonly linkSlots: number;
+  /** 마지막으로 작성자 정리를 돈 분 — 같은 분 안에서는 더 지울 게 생기지 않는다(언급 분은 늘기만 한다) */
+  private lastPruneMinute = -1;
 
   constructor(sinceMs: number, authorCap: number, recentCap: number, postIdCap: number, linkSlots: number) {
     this.sinceMs = sinceMs;
@@ -82,6 +86,8 @@ export class HotInfo {
   }
 
   private pruneAuthors(minute: number): void {
+    if (minute <= this.lastPruneMinute) return;
+    this.lastPruneMinute = minute;
     for (const [k, packed] of this.authors) {
       if (Math.floor(packed / 65536) < minute - 15) this.authors.delete(k);
     }
@@ -165,13 +171,6 @@ export class HotInfo {
     for (const [k, v] of this.links) if (v > bv) { bv = v; best = k; }
     if (best === null || this.postsDecayed <= 0) return null;
     return { url: best, frac: Math.min(1, bv / this.postsDecayed) };
-  }
-
-  topLangs(n: number): string[] {
-    return [...this.langs.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, n)
-      .map(([k]) => k);
   }
 
   bytes(): number {

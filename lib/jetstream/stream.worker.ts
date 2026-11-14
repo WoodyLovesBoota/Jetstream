@@ -448,16 +448,11 @@ function takeSnapshot(): StreamSnapshot {
   for (let i = 0; i < RING_SECONDS; i++) {
     const sec = nowSec - (RING_SECONDS - 1) + i;
     const slot = ring[sec % RING_SECONDS];
+    // 살아 있는 슬롯은 복사 없이 그대로 싣는다 — postMessage가 동기로 structured clone하므로
+    // 이후 bucketAt의 제자리 갱신이 이미 보낸 스냅샷에 새지 않는다
     buckets[i] =
       slot.t === sec
-        ? {
-            t: sec,
-            total: slot.total,
-            kinds: { ...slot.kinds },
-            collections: { ...slot.collections },
-            langs: { ...slot.langs },
-            noLangs: slot.noLangs,
-          }
+        ? slot
         : {
             t: sec,
             total: 0,

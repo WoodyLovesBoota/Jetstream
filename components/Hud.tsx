@@ -92,7 +92,7 @@ export default function Hud() {
   const valueEls = useRef<Partial<Record<RowKey, HTMLElement>>>({});
   const instRef = useRef<HTMLSpanElement | null>(null);
   const recRef = useRef<HTMLSpanElement | null>(null);
-  const rootRef = useRef<HTMLElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const degradedRef = useRef<HTMLParagraphElement | null>(null);
   const degradedDetailRef = useRef<HTMLSpanElement | null>(null);
   const pausedRef = useRef<HTMLParagraphElement | null>(null);
@@ -312,9 +312,10 @@ export default function Hud() {
   }, []);
 
   return (
-    <aside
+    // 랜드마크는 감싸는 Shell의 <aside aria-label="Diagnostics">가 맡는다 — 여기서 또 aside를 두면 중복된다
+    <div
       className={styles.hud}
-      aria-label="diagnostics"
+      data-hud
       ref={rootRef}
       data-paused="false"
       data-degraded="false"
@@ -367,6 +368,6 @@ export default function Hud() {
           </div>
         ))}
       </dl>
-    </aside>
+    </div>
   );
 }

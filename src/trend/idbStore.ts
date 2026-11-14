@@ -1,13 +1,15 @@
 // IndexedDB 저장소 — 워커(또는 메인)에서만 쓴다. 엔진 코어는 BaselineStore 인터페이스만 안다.
 //
 // 레코드 상한 maxRecords — 넘으면 updatedAt이 오래된 것부터 지운다(저장 때마다가 아니라
-// 가끔: saveMany 10번에 한 번). IndexedDB가 없거나(사파리 프라이빗 등) 열기에 실패하면
+// 가끔: saveMany 10번에 한 번). 저장은 SAVE_CHUNK씩 나눈 트랜잭션으로 한다. IndexedDB가 없거나(사파리 프라이빗 등) 열기에 실패하면
 // 빈 저장소처럼 동작한다 — 기억이 없을 뿐 엔진은 돈다.
 
 import type { BaselineRecord, BaselineStore } from "./store.ts";
 
 const DB_NAME = "jetstream-trend";
 const STORE = "baselines";
+/** 트랜잭션 하나에 싣는 레코드 수 — 워커 이벤트 처리를 오래 막지 않을 만큼 */
+const SAVE_CHUNK = 2_000;
 
 function req<T>(r: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -54,17 +56,22 @@ export class IdbStore implements BaselineStore {
   async saveMany(records: BaselineRecord[]): Promise<void> {
     const db = await this.db;
     if (db === null || records.length === 0) return;
-    const tx = db.transaction(STORE, "readwrite");
-    const store = tx.objectStore(STORE);
-    for (const r of records) store.put(r);
-    await new Promise<void>((resolve) => {
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => {
-        console.warn("[trend] IndexedDB save failed", tx.error);
-        resolve();
-      };
-      tx.onabort = () => resolve();
-    });
+    // 분마다 최대 수만 건 — 한 루프에서 put(=structured clone)을 다 부르면 워커가 그동안
+    // 이벤트를 못 받는다. 청크마다 트랜잭션을 끝내고 이벤트 루프에 양보한다(레코드끼리는 독립이다)
+    for (let i = 0; i < records.length; i += SAVE_CHUNK) {
+      const tx = db.transaction(STORE, "readwrite");
+      const store = tx.objectStore(STORE);
+      const end = Math.min(records.length, i + SAVE_CHUNK);
+      for (let j = i; j < end; j++) store.put(records[j]);
+      await new Promise<void>((resolve) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => {
+          console.warn("[trend] IndexedDB save failed", tx.error);
+          resolve();
+        };
+        tx.onabort = () => resolve();
+      });
+    }
     if (++this.saves % 10 === 0) await this.prune(db);
   }
 
