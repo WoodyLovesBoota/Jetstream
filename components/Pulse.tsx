@@ -442,26 +442,6 @@ export default function Pulse() {
   return (
     <div className={styles.root}>
       <div className={styles.controls}>
-        {/* 네 주요 타입의 범례는 머리줄 펜 리드아웃이 겸한다 — 여기엔 그 밖의 표식만 */}
-        <ul className={styles.legend}>
-          <li className={styles.legendItem}>
-            <span className={styles.swatch} style={{ background: TYPE_COLORS.other }} />
-            Other collections
-          </li>
-          {/* 단절 마커 범례 — 띠가 나타났을 때 무슨 뜻인지 화면 안에서 읽히도록 */}
-          {[
-            { label: "Gap", color: GAP_STROKE },
-            { label: "Recovered", color: REPLAY_STROKE },
-          ].map((m) => (
-            <li key={m.label} className={styles.legendItem}>
-              <span
-                className={styles.bandSwatch}
-                style={{ background: withAlpha(m.color, 0.12), borderColor: withAlpha(m.color, 0.8) }}
-              />
-              {m.label}
-            </li>
-          ))}
-        </ul>
         <div className={styles.windowToggle} role="group" aria-label="Time range">
           {WINDOW_OPTIONS.map((w) => (
             <button

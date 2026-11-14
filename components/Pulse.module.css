@@ -14,42 +14,7 @@
   flex: none;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding-left: 40px; /* y축 라벨 폭만큼 들여 플롯 왼쪽 끝과 맞춘다 */
-}
-
-.legend {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 18px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.legendItem {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12px;
-  color: var(--ink-3);
-}
-
-.swatch {
-  width: 14px;
-  height: 2px;
-  flex-shrink: 0;
-}
-
-/* 갭/리플레이 띠 범례 — 차트 위 띠와 같은 모양(반투명 채움 + 파선 테두리) */
-.bandSwatch {
-  width: 14px;
-  height: 10px;
-  flex-shrink: 0;
-  border-left: 1px dashed;
-  border-right: 1px dashed;
+  justify-content: flex-end;
 }
 
 /* 세그먼트 토글 — 고른 칸만 잉크로 채운다 */
