@@ -25,7 +25,7 @@ import type { SlimEvent } from "./slim.ts";
 import { EngageTopK } from "./spacesaving.ts";
 import type { BaselineRecord } from "./store.ts";
 import { BucketSeries, TrackedTable } from "./tracked.ts";
-import type { EngagePing, RepostReach, SpreadingPost, TrendEvent, TrendMember, TrendPost, TrendSnapshot, TrendStats } from "./types.ts";
+import { postTitlePlaceholder, type EngagePing, type RepostReach, type SpreadingPost, type TrendEvent, type TrendMember, type TrendPost, type TrendSnapshot, type TrendStats } from "./types.ts";
 import { normalizeUrl } from "./url.ts";
 
 /** 이벤트 상세 서랍에 싣는 대표 글 수 */
@@ -131,6 +131,12 @@ export interface EngineOptions {
   nowMs: number;
 }
 
+
+/** 화면에 보일 글 문구 — 본문, 본문이 비면 embed 요약(링크 카드 제목·이미지 alt). 140자 */
+function displayText(ev: SlimEvent): string {
+  const x = ev.x ?? "";
+  return (x.trim() !== "" ? x : (ev.e ?? "")).slice(0, 140);
+}
 export class TrendEngine {
   readonly cfg: TrendConfig;
   private readonly alpha: number;
@@ -166,6 +172,8 @@ export class TrendEngine {
   private readonly sessionStartMin: number;
   private lastMinute: number;
   private lastScoreMs = 0;
+  /** 화면 언어 필터 — 학습·판정은 전체 언어로 하고, 화면에 낼 카드·퍼지는 글만 이 언어로 고른다 */
+  private langFilter: string | null = null;
   private lastBackgroundMin: number;
   private lastSnapshot: TrendSnapshot | null = null;
   private lastEvals: Map<string, Eval> = new Map();
@@ -383,7 +391,7 @@ export class TrendEngine {
     let links: string[] | null = null;
     if (isPost && ev.k !== undefined) {
       links = this.linksOf(keys);
-      recent = { did: ev.d, rkey: ev.k, text: (ev.x ?? "").slice(0, 140), timeMs: tMs, langs: ev.g ?? [], links };
+      recent = { did: ev.d, rkey: ev.k, text: displayText(ev), timeMs: tMs, langs: ev.g ?? [], links };
       idHash = postIdHash(ev.d, ev.k);
       if (this.postTexts.size >= POST_TEXT_CAP) {
         const first = this.postTexts.keys().next();
@@ -423,7 +431,7 @@ export class TrendEngine {
           recent = {
             did: ev.d,
             rkey: ev.k ?? "",
-            text: (ev.x ?? "").slice(0, 140),
+            text: displayText(ev),
             timeMs: tMs,
             langs: ev.g ?? [],
             links,
@@ -445,7 +453,7 @@ export class TrendEngine {
         if (h === undefined) continue;
         h.noteAuthor(didHash, minute);
         h.notePost(
-          recent ?? { did: ev.d, rkey: ev.k ?? "", text: (ev.x ?? "").slice(0, 140), timeMs: tMs, langs: ev.g ?? [], links: this.linksOf(keys) },
+          recent ?? { did: ev.d, rkey: ev.k ?? "", text: displayText(ev), timeMs: tMs, langs: ev.g ?? [], links: this.linksOf(keys) },
           postIdHash(ev.d, ev.k ?? String(ev.t)),
         );
       }
@@ -500,6 +508,33 @@ export class TrendEngine {
     snap.stats.scoreMs = this.scoreMs;
     this.lastSnapshot = snap;
     return snap;
+  }
+
+  /**
+   * 화면 언어 필터. 베이스라인·후보·판정은 건드리지 않으므로 바꿔도 다시 배우지 않는다 —
+   * 카드 상한(maxEvents)을 자르기 전에 주 언어로 고를 뿐이다. 다음 tick에서 바로 다시 점수를 낸다.
+   */
+  setLangFilter(lang: string | null): void {
+    const next = lang === null ? null : primaryLang([lang]);
+    this.langFilter = next === "und" ? null : next;
+    this.lastScoreMs = -Infinity;
+  }
+
+  /** 언어 집계(lang → 가중치)의 주 언어가 필터와 맞는가. 필터가 없으면 늘 참, 모르는 언어(und)는 거짓 */
+  private langOk(langs: ReadonlyMap<string, number> | readonly string[] | undefined): boolean {
+    const want = this.langFilter;
+    if (want === null) return true;
+    if (langs === undefined) return false;
+    if (Array.isArray(langs)) return langs[0] === want;
+    let top: string | null = null;
+    let topV = 0;
+    for (const [l, v] of langs as ReadonlyMap<string, number>) {
+      if (l !== "und" && v > topV) {
+        top = l;
+        topV = v;
+      }
+    }
+    return top === want;
   }
 
   snapshot(): TrendSnapshot | null {
@@ -800,7 +835,9 @@ export class TrendEngine {
     const events = this.buildEvents(evals, nowMs, bNow, minute, watchPool, { g5, gPrev, W });
     // 퍼지는 글 — 이벤트 소속 표시
     spreading.sort((x, y) => y.score - x.score || y.p5 - x.p5);
-    const spreadTop = spreading.slice(0, c.spreadingMax);
+    // 언어 필터 — 세션 중 본 글만 언어를 안다(못 본 글은 필터가 걸려 있으면 뺀다)
+    const spreadTop = (this.langFilter === null ? spreading : spreading.filter((s) => this.langOk(this.postTexts.get(s.uri)?.langs.map((l) => primaryLang([l])))))
+      .slice(0, c.spreadingMax);
     this.spreadingKeys = new Map();
     for (const s of spreadTop) {
       s.eventId = this.eventOfKey.get(`p:${s.uri}`) ?? null;
@@ -814,6 +851,7 @@ export class TrendEngine {
       spreading: spreadTop,
       learning: { active: this.learning(nowMs), minutes: Math.floor(sessionMin), hasPrior: this.hasPrior },
       stats: this.stats(g5),
+      lang: this.langFilter,
     };
   }
 
@@ -952,7 +990,9 @@ export class TrendEngine {
       if (card.exitedAt !== null && nowMs - card.exitedAt > c.pastKeepMin * MIN_MS) this.events.delete(id);
     }
 
-    const active = built.sort((x, y) => y.rankScore - x.rankScore || y.score - x.score).slice(0, c.maxEvents);
+    const ranked = built.sort((x, y) => y.rankScore - x.rankScore || y.score - x.score);
+    // 언어 필터는 상한을 자르기 전에 — 아니면 다수 언어 카드가 15칸을 다 차지해 고른 언어가 안 남는다
+    const active = (this.langFilter === null ? ranked : ranked.filter((e) => this.langOk(e.langs))).slice(0, c.maxEvents);
     const watch = this.buildWatch(watchPool, evals, nextOf, usedIds, active, nowMs, bNow, minute, win);
     // 관찰 카드도 표시용 도달은 보여 준다(순위에는 안 쓴다 — 관찰 카드 순서는 z순)
     for (const w of watch) {
@@ -960,11 +1000,12 @@ export class TrendEngine {
       const reach = this.amp.reach(this.amp.union(keyHashes(keys), minute), this.eventPosts(keys, evals, nowMs), minute, nowMs);
       w.repostReach = reachOut(reach, reach.r);
     }
-    this.amp.retain(new Set(active.map((e) => e.id)));
+    // 필터로 가린 상위 이벤트도 R 평활 상태는 지킨다 — 필터를 풀었을 때 순위가 튀지 않게
+    this.amp.retain(new Set([...ranked.slice(0, c.maxEvents), ...active].map((e) => e.id)));
     this.eventOfHash = new Map();
     for (const [k, id] of nextOf) this.eventOfHash.set(hash32(k), id);
     const past = [...this.events.values()]
-      .filter((e) => e.state === "past")
+      .filter((e) => e.state === "past" && this.langOk(e.langs))
       .sort((x, y) => (y.exitedAt ?? 0) - (x.exitedAt ?? 0))
       .slice(0, Math.max(0, c.maxEvents - active.length - watch.length));
     return this.paint([...active, ...watch, ...past]);
@@ -1032,7 +1073,7 @@ export class TrendEngine {
   ): TrendEvent[] {
     const c = this.cfg;
     const room = Math.max(0, Math.min(c.watchMax, c.maxEvents - activeCards.length));
-    const ranked = pool.filter((p) => !nextOf.has(p.key)).sort((x, y) => y.z - x.z || y.x - x.x);
+    const ranked = pool.filter((p) => !nextOf.has(p.key) && this.langOk(this.hot.get(p.key)?.langs)).sort((x, y) => y.z - x.z || y.x - x.x);
     const rankOf = new Map(ranked.map((p, i) => [p.key, i]));
     const byKey = new Map(ranked.map((p) => [p.key, p]));
 
@@ -1263,7 +1304,7 @@ export class TrendEngine {
     if (pUri !== null) {
       // 글 본문: 세션 중 본 글이면 LRU에서, 아니면 UI가 getPosts로 하이드레이션한다
       const known = this.postTexts.get(pUri);
-      title = known?.text.slice(0, 80) || `Post ${pUri.split("/").pop() ?? ""}`;
+      title = known?.text.slice(0, 80) || postTitlePlaceholder(pUri);
       if (known !== undefined && !representativePosts.some((p) => p.rkey === known.rkey && p.did === known.did)) {
         representativePosts.unshift({
           did: known.did,

@@ -41,6 +41,27 @@ export function setFilterMode(mode: FilterMode): void {
   send({ type: "setFilter", wantedCollections: collectionsFor(mode) });
 }
 
+/** 화면 언어 필터 — 워커가 재생성되면 다시 보내야 하므로 모듈 스코프에 둔다 */
+let langFilter: string | null = null;
+const langListeners = new Set<() => void>();
+
+/** 언어 필터 전환 — null이면 전체. 소켓은 다시 열지 않는다(Jetstream엔 언어 필터가 없다) */
+export function setLangFilter(lang: string | null): void {
+  if (lang === langFilter) return;
+  langFilter = lang;
+  send({ type: "setLang", lang });
+  for (const l of langListeners) l();
+}
+
+export function getLangFilter(): string | null {
+  return langFilter;
+}
+
+export function subscribeLangFilter(l: () => void): () => void {
+  langListeners.add(l);
+  return () => langListeners.delete(l);
+}
+
 /**
  * 픽스처 스트림 모드 — URL `?fixture=이름`이면 Jetstream 대신 결정적 합성 스트림을
  * 재생한다(네트워크 불필요, e2e·오프라인 데모용).
@@ -82,6 +103,8 @@ export function subscribeStream(listener: Listener): () => void {
       }
     };
     const fixture = fixtureName();
+    // 언어 필터는 연결·픽스처보다 먼저 — 첫 스냅샷부터 걸려 있게
+    if (langFilter !== null) send({ type: "setLang", lang: langFilter });
     if (fixture !== null) {
       send({ type: "fixture", name: fixture });
     } else {

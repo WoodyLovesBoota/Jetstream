@@ -1,13 +1,40 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { toggleRenderPause, useRenderPaused } from "@/lib/jetstream/renderGate";
-import { setFilterMode, useStreamWorker } from "@/lib/jetstream/useStreamWorker";
+import { getLangFilter, setFilterMode, setLangFilter, subscribeLangFilter, useStreamWorker } from "@/lib/jetstream/useStreamWorker";
 import { tagInk } from "./cursors";
+import { LANG_OPTIONS } from "./labels";
 import { subscribeRoster } from "./rosterBus";
 
 // 상단 툴바(48px) — 연결 상태, 필터, Pause, 지금 화면 커서 아바타 스택(최대 6 + +N), 패널 토글.
 // 아바타 스택은 2Hz로 DOM만 고친다(React 리렌더 없음).
+
+const LANG_STORAGE_KEY = "jetstream.lang";
+const isLangCode = (v: string | null): v is string => v !== null && LANG_OPTIONS.some((o) => o.code === v);
+
+/** 처음 고를 언어 — 주소의 `?lang=ko`가 먼저, 없으면 지난번 고른 값 */
+function initialLang(): string | null {
+  const fromUrl = new URLSearchParams(location.search).get("lang");
+  if (fromUrl === "all") return null;
+  if (isLangCode(fromUrl)) return fromUrl;
+  try {
+    const saved = localStorage.getItem(LANG_STORAGE_KEY);
+    return isLangCode(saved) ? saved : null;
+  } catch {
+    return null; // 사생활 보호 모드 등 — 저장소가 없으면 전체로
+  }
+}
+
+function chooseLang(lang: string | null): void {
+  setLangFilter(lang);
+  try {
+    if (lang === null) localStorage.removeItem(LANG_STORAGE_KEY);
+    else localStorage.setItem(LANG_STORAGE_KEY, lang);
+  } catch {
+    // 저장 실패는 무시 — 이번 세션엔 걸려 있다
+  }
+}
 
 function connLabel(state: string, attempt: number): string {
   switch (state) {
@@ -31,6 +58,11 @@ export default function Toolbar({ panelOpen, onTogglePanel }: { panelOpen: boole
   const paused = useRenderPaused();
   const stackRef = useRef<HTMLDivElement>(null);
   const full = conn.filter === "full";
+  const lang = useSyncExternalStore(subscribeLangFilter, getLangFilter, () => null);
+
+  useEffect(() => {
+    setLangFilter(initialLang());
+  }, []);
 
   useEffect(() => {
     return subscribeRoster((list, total) => {
@@ -85,6 +117,22 @@ export default function Toolbar({ panelOpen, onTogglePanel }: { panelOpen: boole
             All
           </button>
         </div>
+        {/* 언어 — 카드·퍼지는 글·라이브 피드만 그 언어로. 평소 학습은 전체 언어로 계속 돈다 */}
+        <select
+          className="tb-btn tb-lang"
+          aria-label="Language"
+          title="Show trends in one language — the baseline keeps learning from every language"
+          value={lang ?? ""}
+          data-active={lang !== null}
+          onChange={(e) => chooseLang(e.target.value === "" ? null : e.target.value)}
+        >
+          <option value="">All languages</option>
+          {LANG_OPTIONS.map((o) => (
+            <option key={o.code} value={o.code}>
+              {o.name}
+            </option>
+          ))}
+        </select>
         <button type="button" className="tb-btn" data-paused={paused} aria-pressed={paused} onClick={toggleRenderPause} title="Pauses rendering only — the worker keeps counting">
           {paused ? "Resume" : "Pause"}
         </button>

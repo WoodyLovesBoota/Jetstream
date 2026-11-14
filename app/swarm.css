@@ -203,6 +203,17 @@ body {
   border-color: var(--ink-3);
 }
 
+/* 언어 선택 — 고른 상태면 테두리를 진하게(전체일 때와 구분) */
+.tb-lang {
+  max-width: 14ch;
+  padding-right: var(--sp-2);
+}
+
+.tb-lang[data-active="true"] {
+  background: var(--sunken);
+  border-color: var(--ink-3);
+}
+
 .tb-seg {
   display: flex;
   height: 28px;

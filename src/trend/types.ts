@@ -30,6 +30,14 @@ export interface TrendPost {
   langs: string[];
 }
 
+/**
+ * 제목 글(p:/q:)의 본문을 세션 중 못 봤을 때(또는 본문이 비어 링크 카드만 있을 때) 엔진이
+ * 임시로 다는 제목. UI는 이 값과 같으면 getPosts 하이드레이션 결과로 갈아 끼운다.
+ */
+export function postTitlePlaceholder(uri: string): string {
+  return `Post ${uri.split("/").pop() ?? ""}`;
+}
+
 export interface TrendEvent {
   id: number;
   /** 12색 팔레트 인덱스 */
@@ -125,6 +133,8 @@ export interface TrendSnapshot {
   spreading: SpreadingPost[];
   learning: { active: boolean; minutes: number; hasPrior: boolean };
   stats: TrendStats;
+  /** 이 스냅샷에 걸린 언어 필터(주 언어 코드, 예: "ko"). null이면 전체 */
+  lang: string | null;
 }
 
 /** 좋아요·리포스트가 퍼지는 글/이벤트에 들어온 순간 — UI 클릭 링 */

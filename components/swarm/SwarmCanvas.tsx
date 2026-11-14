@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { TapeRow, TrendEvent } from "@/lib/jetstream/protocol";
+import type { TapeRow, TrendEvent, TrendSnapshot } from "@/lib/jetstream/protocol";
 import { subscribeRenderPause, isRenderPaused } from "@/lib/jetstream/renderGate";
 import { latestTrend, subscribeStream } from "@/lib/jetstream/useStreamWorker";
 import { Hydrator } from "@/src/trend/hydrate";
+import { postTitlePlaceholder } from "@/src/trend/types";
 import { SwarmController } from "./controller";
 import { cardColor } from "./cursors";
-import { capitalize, fmtMult, stateLabel } from "./labels";
+import { capitalize, fmtMult, langName, stateLabel } from "./labels";
 import HudPill from "./HudPill";
 import { publishRoster } from "./rosterBus";
 import { renderSpreading } from "./spreading";
@@ -80,7 +81,31 @@ export default function SwarmCanvas() {
     const fixture = new URLSearchParams(location.search).get("fixture") !== null;
     const hydrator = fixture
       ? null // 픽스처 URI는 실제 글이 아니다 — 네트워크를 타지 않는다
-      : new Hydrator({ fetch: (u, i) => fetch(u, i), now: () => Date.now(), onUpdate: () => redrawSpreading() });
+      : new Hydrator({ fetch: (u, i) => fetch(u, i), now: () => Date.now(), onUpdate: () => onHydrated() });
+    // 엔진이 본문을 못 본 글 카드는 제목이 `Post <rkey>` — 하이드레이션된 본문으로 갈아 끼운다
+    const withPostTitles = (trend: TrendSnapshot): TrendSnapshot => {
+      if (hydrator === null) return trend;
+      let changed = false;
+      const events = trend.events.map((e) => {
+        if (e.postUri === null || e.title !== postTitlePlaceholder(e.postUri)) return e;
+        const text = hydrator.get(e.postUri)?.text.replace(/\s+/g, " ").trim() ?? "";
+        if (text === "") return e;
+        changed = true;
+        return { ...e, title: text.slice(0, 80) };
+      });
+      return changed ? { ...trend, events } : trend;
+    };
+    const applyTrend = (raw: TrendSnapshot): void => {
+      const trend = withPostTitles(raw);
+      ctl.setTrend(trend);
+      // 열린 카드는 최신 값으로
+      setOpenEv((cur) => (cur === null ? cur : (trend.events.find((e) => e.id === cur.id) ?? cur)));
+    };
+    const onHydrated = (): void => {
+      redrawSpreading();
+      const t = latestTrend();
+      if (t !== null) applyTrend(t);
+    };
     const colorOf = (id: number): number | null => latestTrend()?.events.find((e) => e.id === id)?.colorIdx ?? null;
     const redrawSpreading = (): void => {
       const t = latestTrend();
@@ -98,20 +123,22 @@ export default function SwarmCanvas() {
     const unsub = subscribeStream((s) => {
       lastStatus = s.trendStatus;
       if (s.trend !== null) {
-        ctl.setTrend(s.trend);
+        applyTrend(s.trend);
         redrawSpreading();
         const active = s.trend.events.filter((e) => e.state !== "past").length;
         board.dataset.events = String(active);
         const empty = emptyRef.current;
         if (empty !== null) {
           empty.hidden = s.trend.events.length > 0;
+          const lang = s.trend.lang;
           empty.textContent = s.trend.learning.active
             ? `Learning the baseline — ${s.trend.learning.minutes} of 10 min. After that, anything rising faster than its usual level gets drawn here as a card.`
-            : "Collecting what people are saying right now. In a few seconds, cursors leave the live feed on the left and start drawing cards.";
+            : lang !== null
+              ? `Nothing in ${langName(lang)} is rising above its usual level right now. Cards show up here as soon as something does — or pick All languages.`
+              : "Collecting what people are saying right now. In a few seconds, cursors leave the live feed on the left and start drawing cards.";
         }
-        hydrator?.want([...s.trend.spreading.map((p) => p.uri), ...s.trend.events.flatMap((e) => (e.postUri !== null ? [e.postUri] : []))]);
-        // 열린 카드는 최신 값으로
-        setOpenEv((cur) => (cur === null ? cur : (s.trend?.events.find((e) => e.id === cur.id) ?? cur)));
+        // 카드 제목이 걸린 글이 먼저 — want()는 상위 20개만 본다
+        hydrator?.want([...s.trend.events.flatMap((e) => (e.postUri !== null ? [e.postUri] : [])), ...s.trend.spreading.map((p) => p.uri)]);
       }
       if (s.tapeRows.length > 0) ctl.spawnRows(s.tapeRows);
       if (s.pings.length > 0) ctl.pingEngagements(s.pings);

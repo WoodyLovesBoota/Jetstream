@@ -361,6 +361,11 @@ export type MainToWorker =
    */
   | { type: "setFilter"; wantedCollections: string[] }
   /**
+   * 화면 언어 필터 — 주 언어 코드(예: "ko") 또는 null(전체). 트렌드 카드·퍼지는 글·Tape만
+   * 그 언어로 고르고, 엔진 학습과 게이지·Pulse·Mix는 계속 전체 언어로 돈다(바꿔도 다시 배우지 않는다).
+   */
+  | { type: "setLang"; lang: string | null }
+  /**
    * 픽스처 스트림 모드 — Jetstream 대신 결정적 합성 스트림을 재생한다(네트워크 불필요).
    * e2e와 오프라인 데모용. 이름은 src/trend/fixtures.ts의 시나리오.
    */

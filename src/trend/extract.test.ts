@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { bskyUrl, extractKeys, kindOf, labelOf, normalizeWord, wordStream } from "./extract.ts";
 import { stripKoreanParticle } from "./korean.ts";
 import type { SlimEvent } from "./slim.ts";
-import { slimEvent } from "./slim.ts";
+import { slimEvent, toRawEvent } from "./slim.ts";
 import { normalizeUrl } from "./url.ts";
 
 const opt = (bg: string[] = []) => ({
@@ -196,5 +196,38 @@ describe("보조", () => {
     const out: (string | null)[] = [];
     wordStream("alpha beta, gamma", undefined, out);
     expect(out).toEqual(["alpha", "beta", null, "gamma"]);
+  });
+
+  it("slimEvent: 링크 카드 제목·이미지 alt를 embed 요약(e)으로 — 본문이 빈 글의 대체 문구", () => {
+    const post = (embed: unknown) => ({
+      did: "did:plc:a",
+      time_us: 7,
+      kind: "commit",
+      commit: { collection: "app.bsky.feed.post", operation: "create", rkey: "rk", record: { text: "", embed } },
+    });
+    const title = "Sean Duffy says the air traffic control system will “continue to fail”";
+    expect(slimEvent(post({ $type: "app.bsky.embed.external", external: { uri: "https://v.com/1", title } }))).toEqual({
+      t: 7,
+      d: "did:plc:a",
+      c: "p",
+      k: "rk",
+      u: ["https://v.com/1"],
+      e: title,
+    });
+    expect(slimEvent(post({ $type: "app.bsky.embed.images", images: [{ alt: " " }, { alt: "a cat" }] }))?.e).toBe("a cat");
+    expect(
+      slimEvent(post({ $type: "app.bsky.embed.recordWithMedia", record: { record: { uri: "at://q" } }, media: { $type: "app.bsky.embed.external", external: { uri: "https://v.com/2", title: "t2" } } }))?.e,
+    ).toBe("t2");
+    expect(slimEvent(post({ $type: "app.bsky.embed.external", external: { uri: "https://v.com/3", title: "" } }))?.e).toBeUndefined();
+  });
+
+  it("toRawEvent → slimEvent 왕복은 같은 이벤트 (embed 요약 포함)", () => {
+    const cases: SlimEvent[] = [
+      { t: 1, d: "did:plc:a", c: "p", k: "r1", x: "hi", g: ["ko"], h: ["Tag"], u: ["https://a.com/1"] },
+      { t: 2, d: "did:plc:a", c: "p", k: "r2", u: ["https://a.com/2"], e: "headline" },
+      { t: 3, d: "did:plc:a", c: "p", k: "r3", q: "at://q/app.bsky.feed.post/1", e: "headline" },
+      { t: 4, d: "did:plc:a", c: "l", s: "at://s" },
+    ];
+    for (const e of cases) expect(slimEvent(toRawEvent(e))).toEqual(e);
   });
 });

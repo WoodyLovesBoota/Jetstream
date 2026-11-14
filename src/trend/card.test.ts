@@ -17,7 +17,7 @@ const prior: Prior = {
   entries: new Map([["w:placeholder", { mu: 0.001, phi: 0.1 }]]),
 };
 
-function run(o: Partial<SynthOptions>): { snaps: TrendSnapshot[]; engine: TrendEngine } {
+function run(o: Partial<SynthOptions>, lang: string | null = null): { snaps: TrendSnapshot[]; engine: TrendEngine } {
   const opts: SynthOptions = {
     seed: 7,
     startMs: T0,
@@ -30,6 +30,7 @@ function run(o: Partial<SynthOptions>): { snaps: TrendSnapshot[]; engine: TrendE
     ...o,
   };
   const engine = new TrendEngine({ nowMs: T0, prior });
+  engine.setLangFilter(lang);
   const snaps: TrendSnapshot[] = [];
   let next = T0 + 1000;
   for (const ev of synthStream(opts)) {
@@ -193,5 +194,63 @@ describe("관찰 카드(트렌드 판정 전)", () => {
     const wid = watchSnap?.events.find((e) => e.titleKey === "h:eclipse2026")?.id;
     const aid = activeSnap?.events.find((e) => e.members.some((m) => m.key === "h:eclipse2026"))?.id;
     expect(aid).toBe(wid);
+  });
+});
+
+describe("언어 필터", () => {
+  const start = T0 + 12 * MIN;
+  const topics: SynthOptions["topics"] = [
+    {
+      text: (_i, rr) => `#eclipse2026 total solar eclipse ${["amazing", "wow", "clouds", "photo"][Math.floor(rr() * 4)]}`,
+      startMs: start,
+      endMs: T0 + 20 * MIN,
+      perMin: 25,
+      authors: 5000,
+      authorPrefix: "ecl",
+      hashtags: ["eclipse2026"],
+      langs: ["ja"],
+    },
+    {
+      text: (_i, rr) => `#불꽃축제 여의도 불꽃놀이 ${["대박", "사진", "사람많음", "최고"][Math.floor(rr() * 4)]}`,
+      startMs: start,
+      endMs: T0 + 20 * MIN,
+      perMin: 25,
+      authors: 5000,
+      authorPrefix: "fire",
+      hashtags: ["불꽃축제"],
+      langs: ["ko-KR"],
+    },
+  ];
+  const has = (s: TrendSnapshot, key: string): boolean => s.events.some((e) => e.members.some((m) => m.key === key));
+
+  it("필터 없음 — 두 언어 카드가 다 뜬다", () => {
+    const { snaps } = run({ topics });
+    expect(snaps.some((s) => has(s, "h:eclipse2026"))).toBe(true);
+    expect(snaps.some((s) => has(s, "h:불꽃축제"))).toBe(true);
+    expect(snaps.every((s) => s.lang === null)).toBe(true);
+  });
+
+  it("ko — 주 언어가 한국어인 카드만, ja 주제는 안 나온다", () => {
+    const { snaps } = run({ topics }, "ko");
+    expect(snaps.some((s) => has(s, "h:불꽃축제"))).toBe(true);
+    expect(snaps.some((s) => has(s, "h:eclipse2026"))).toBe(false);
+    for (const s of snaps) {
+      expect(s.lang).toBe("ko");
+      for (const e of s.events) expect(e.langs[0]).toBe("ko");
+    }
+  });
+
+  it("필터를 바꾸면 다음 tick에서 바로 다시 점수를 낸다", () => {
+    const { engine, snaps } = run({ topics, endMs: T0 + 18 * MIN });
+    const last = snaps.at(-1);
+    expect(last).toBeDefined();
+    engine.setLangFilter("ja-JP");
+    const s = engine.tick((last?.ts ?? 0) + 1);
+    expect(s).not.toBeNull();
+    expect(s?.lang).toBe("ja");
+    expect(s?.events.every((e) => e.langs[0] === "ja")).toBe(true);
+    expect(s !== null && has(s, "h:eclipse2026")).toBe(true);
+    engine.setLangFilter(null);
+    expect(engine.tick((last?.ts ?? 0) + 2)?.lang).toBeNull();
   });
 });

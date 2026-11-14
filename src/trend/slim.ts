@@ -16,6 +16,11 @@ export interface SlimEvent {
   k?: string;
   /** post 본문 */
   x?: string;
+  /**
+   * embed 요약 — 링크 카드 제목, 없으면 첫 이미지 alt. 화면 표시 전용(본문이 빈 글의 대체 문구)이라
+   * 후보 추출(단어·바이그램)에는 쓰지 않는다. 뉴스 봇처럼 링크 카드만 올리는 글이 흔해서다.
+   */
+  e?: string;
   /** post langs */
   g?: string[];
   /** facet 해시태그 (# 없이, 원문 대소문자) */
@@ -46,13 +51,29 @@ const COLLECTION_CODE: Record<string, SlimEvent["c"]> = {
   "app.bsky.feed.repost": "r",
 };
 
-/** embed에서 외부 링크·인용 URI를 뽑는다. recordWithMedia는 양쪽 다 볼 수 있다. */
-function readEmbed(embed: Obj | null, links: string[], out: { q?: string }): void {
+/** embed 요약 문구 상한 — 카드 제목은 80자로 자르지만 대표 글 인용은 140자까지 보여 준다 */
+const EMBED_SUMMARY_MAX = 200;
+
+/** embed에서 외부 링크·인용 URI·요약 문구를 뽑는다. recordWithMedia는 양쪽 다 볼 수 있다. */
+function readEmbed(embed: Obj | null, links: string[], out: { q?: string; e?: string }): void {
   if (embed === null) return;
   const type = str(embed.$type);
   if (type === "app.bsky.embed.external") {
-    const uri = str(obj(embed.external)?.uri);
+    const external = obj(embed.external);
+    const uri = str(external?.uri);
     if (uri !== null) links.push(uri);
+    const title = (str(external?.title) ?? "").trim();
+    if (title !== "") out.e = title.slice(0, EMBED_SUMMARY_MAX);
+  } else if (type === "app.bsky.embed.images") {
+    if (out.e === undefined && Array.isArray(embed.images)) {
+      for (const img of embed.images) {
+        const alt = (str(obj(img)?.alt) ?? "").trim();
+        if (alt !== "") {
+          out.e = alt.slice(0, EMBED_SUMMARY_MAX);
+          break;
+        }
+      }
+    }
   } else if (type === "app.bsky.embed.record") {
     const uri = str(obj(embed.record)?.uri);
     if (uri !== null) out.q = uri;
@@ -110,11 +131,12 @@ export function slimEvent(raw: unknown): SlimEvent | null {
       }
     }
   }
-  const embedOut: { q?: string } = {};
+  const embedOut: { q?: string; e?: string } = {};
   readEmbed(obj(record.embed), links, embedOut);
   if (tags.length > 0) out.h = tags.slice(0, 10);
   if (links.length > 0) out.u = Array.from(new Set(links)).slice(0, 5);
   if (embedOut.q !== undefined) out.q = embedOut.q;
+  if (embedOut.e !== undefined) out.e = embedOut.e;
   const parent = str(obj(obj(record.reply)?.parent)?.uri);
   if (parent !== null) out.rp = parent;
   return out;
@@ -137,7 +159,14 @@ export function toRawEvent(e: SlimEvent): Record<string, unknown> {
     for (const tag of e.h ?? []) facets.push({ features: [{ $type: "app.bsky.richtext.facet#tag", tag }] });
     for (const uri of e.u ?? []) facets.push({ features: [{ $type: "app.bsky.richtext.facet#link", uri }] });
     if (facets.length > 0) record.facets = facets;
-    if (e.q !== undefined) record.embed = { $type: "app.bsky.embed.record", record: { uri: e.q } };
+    // 요약은 링크 카드 제목으로 되돌린다 — uri가 비어 있어 링크(u)로는 다시 읽히지 않는다
+    const media = e.e !== undefined ? { $type: "app.bsky.embed.external", external: { uri: "", title: e.e } } : null;
+    if (e.q !== undefined) {
+      const rec = { uri: e.q };
+      record.embed = media === null ? { $type: "app.bsky.embed.record", record: rec } : { $type: "app.bsky.embed.recordWithMedia", record: { record: rec }, media };
+    } else if (media !== null) {
+      record.embed = media;
+    }
     if (e.rp !== undefined) record.reply = { parent: { uri: e.rp }, root: { uri: e.rp } };
   }
   return {

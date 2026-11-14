@@ -197,6 +197,8 @@ const tapeSkippedRate = makeRateWindow();
 // 빠지고 나머지(게이지·Pulse·Mix·Tape)는 그대로 돈다. 평소 기억은 IndexedDB에서 불러와
 // 합치고, 엔진이 1분마다 내놓는 저장 대기열을 비동기로 쓴다 — 스트림 처리를 막지 않는다.
 let engine: TrendEngine | null = null;
+/** 화면 언어 필터(주 언어 코드). 엔진 카드 선택과 Tape 샘플링에만 걸린다 — 게이지·Pulse·Mix는 전체 */
+let langFilter: string | null = null;
 let store: IdbStore | null = null;
 const trendStatus: TrendStatus = { state: "loading", prior: "pending", memoryRecords: 0, fixture: null, skippedBeforeReady: 0 };
 let trendStatsCache: TrendStats | null = null;
@@ -229,6 +231,7 @@ async function initTrend(): Promise<void> {
   const prior = await loadPrior();
   if (trendStatus.fixture !== null) return; // 그 사이 픽스처 모드로 바뀌었다
   engine = new TrendEngine({ nowMs: Date.now(), prior });
+  engine.setLangFilter(langFilter);
   trendStatus.state = "ready";
   store = new IdbStore();
   const recs = await store.loadAll();
@@ -373,7 +376,8 @@ function processFrame(data: unknown): void {
         if (lang === null) bucket.noLangs++;
         else bucket.langs[lang] = (bucket.langs[lang] ?? 0) + 1;
 
-        if (typeof ev.commit.record?.text === "string") {
+        // 언어 필터가 걸리면 Tape(=스웜 커서의 출발점)도 그 언어 글만 — stride도 그 글 수로 다시 맞춘다
+        if (typeof ev.commit.record?.text === "string" && (langFilter === null || lang === langFilter)) {
           postCandidatesTotal++;
           strideCounter++;
           if (strideCounter >= strideN) {
@@ -558,6 +562,7 @@ function startFixture(name: string): void {
     pending = gen.next();
   }
   engine = fx;
+  engine.setLangFilter(langFilter);
   trendStatus.state = "ready";
   fixtureTimer = setInterval(() => {
     const limit = Date.now();
@@ -588,6 +593,11 @@ self.onmessage = (e: MessageEvent<MainToWorker>) => {
     case "setFilter":
       // 재연결하되 커서를 재사용한다 — 전환 구간이 비지 않고 갭도 남지 않는다
       connection.setFilter(msg.wantedCollections);
+      break;
+    case "setLang":
+      // 소켓은 그대로 — Jetstream엔 언어 필터가 없다. 고르는 건 워커 안에서
+      langFilter = msg.lang === null ? null : primaryLang([msg.lang]);
+      engine?.setLangFilter(langFilter);
       break;
     case "debug":
       if (msg.action === "drop") {
