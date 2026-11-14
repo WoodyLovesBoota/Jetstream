@@ -46,16 +46,16 @@ description: Jetstream Deck 변경을 실제 브라우저에서 구동해 검증
   `.trendStats`(1Hz) = `{tracked, trackedCap(30k), hot, engage, trackedEvicted, muted, approxBytes, scoreMs, …}`,
   `.trendStatus` = `{state(loading|ready), prior(loaded|missing|error), memoryRecords, fixture}`, `.pings`(참여 핑).
   - **prior**: 정상이면 `trendStatus.prior === "loaded"`, `trend.learning.active === false`. prior가 없으면
-    첫 10분은 `learning.active`이고 진입이 막힌다(하단 상태줄에 "평소 배우는 중 n분").
+    첫 10분은 `learning.active`이고 진입이 막힌다(하단 상태줄에 "learning baseline nm").
   - **불변식**: 활성 이벤트 제목 멤버가 배경어 단어(`w:` ∈ D)인 경우 0. p:(좋아요 몰린 글)만으로 된
     이벤트는 없다(퍼지는 글 탭 전용).
   - 프로덕션에서도 `globalThis.__swarm.stats()`(커서 수·이벤트별 커서·카드)와 `.status()`가 있다.
 - 스웜 UI(components/swarm/): `.sw-card[data-event-id][data-state][data-life][data-built][data-size]`,
-  `.sw-cursor`(≤150), 탭 `[role="tab"]` 2개(트렌드 카드/반응 몰리는 글), 상세 서랍 `.sw-drawer`(+ `.sw-scrim`), 캔버스 하단 상태줄 `.hud-pill.sw-status`(`data-state`, `data-paused`),
+  `.sw-cursor`(≤150), 탭 `[role="tab"]` 2개(Trend cards/Hot posts), 상세 서랍 `.sw-drawer`(+ `.sw-scrim`), 캔버스 하단 상태줄 `.hud-pill.sw-status`(`data-state`, `data-paused`),
   진단 패널 `#inspector`(툴바 "진단" 버튼, ≤900px에선 숨김), 데이터 레일 `.rail`(≤900px에선 숨김).
   - **관찰 카드** `state === "watch"`: 트렌드 판정 전이라도 지금 많이 나오는 후보(작성자 ≥3, 평소보다 많음)를
     바로 그린다(라이브 실측 첫 카드 ~25초, 최대 8장, 점선 테두리). 진입하면 같은 ID로 active가 된다.
-    커서는 레일 Tape 맨 위(`[data-swarm-origin]`)에서 출발한다. 상태줄은 `트렌드 n · 관찰 m`. 디자인은 라이트 기록지 한 장(design/jetstream-trends-live) — 트렌드만 식별색 2개(#692cf3/#477209), 관찰·무소속은 --ink-3. 툴바 연결 상태·버튼 문구는 한국어("수신 중", "일시정지").
+    커서는 레일 Tape 맨 위(`[data-swarm-origin]`)에서 출발한다. 상태줄은 `trends n · watching m`. 디자인은 라이트 기록지 한 장(design/jetstream-trends-live) — 카드 식별색 12색, 지나간 카드만 --ink-3. 무소속 글(카드 없는 실제 표본)은 일부만 흐린 커서(`data-idle="true"`, opacity 0.35)로 떠돌다 나간다. UI 문구는 전부 영어다(툴바 "Live", "Pause", "Diagnostics"). 카드 문장 끝에 리포스트 도달 `↻ n reposters · ×amp`(`.sw-reach`, amp≥3이면 `data-hot`), 카드 위 ↻ 링 `.sw-reach-ring`.
   - 수신 범위 토글은 `.tb-seg [role="radio"]`(주요/전체, `aria-checked`가 현재 상태).
   - **픽스처 모드** `?fixture=news`: 네트워크 없이 카드 3개가 접속 직후 그려지고(built false→true),
     ~30초 뒤 `#worldcupfinal`, ~1분 뒤 `東京 地震`, `#aurora`는 식다가 2~3분 안에 past로 흐려진다.
