@@ -27,8 +27,10 @@ const plexSansKR = IBM_Plex_Sans_KR({
   preload: false,
 });
 
-// URL fields such as og:image and canonical will be added along with metadataBase once the deployment domain is decided
 export const metadata: Metadata = {
+  // Resolves relative social image URLs (app/opengraph-image.tsx) and the canonical URL
+  metadataBase: new URL("https://jetstream-phi.vercel.app"),
+  alternates: { canonical: "/" },
   title: "Jetstream Deck",
   description: "Real-time dashboard for the Bluesky Jetstream firehose",
   openGraph: {
@@ -36,11 +38,13 @@ export const metadata: Metadata = {
     description:
       "A real-time dashboard that subscribes to Bluesky Jetstream (the public WebSocket firehose) directly from the browser",
     type: "website",
+    url: "/",
     siteName: "Jetstream Deck",
     locale: "en_US",
   },
   twitter: {
-    card: "summary",
+    // app/opengraph-image.tsx supplies the image (Next emits it as twitter:image too)
+    card: "summary_large_image",
     title: "Jetstream Deck",
     description: "Real-time dashboard for the Bluesky Jetstream firehose",
   },
