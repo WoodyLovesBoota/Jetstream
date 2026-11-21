@@ -27,8 +27,10 @@ const plexSansKR = IBM_Plex_Sans_KR({
   preload: false,
 });
 
-// og:image·canonical 같은 URL 필드는 배포 도메인이 정해지면 metadataBase와 함께 추가한다
 export const metadata: Metadata = {
+  // 상대 경로 소셜 이미지(app/opengraph-image.tsx)와 canonical을 이 도메인 기준으로 푼다
+  metadataBase: new URL("https://jetstream-phi.vercel.app"),
+  alternates: { canonical: "/" },
   title: "Jetstream Trends",
   description: "What is spreading on Bluesky right now, faster than usual — a live trend swarm",
   openGraph: {
@@ -36,11 +38,13 @@ export const metadata: Metadata = {
     description:
       "A live dashboard that subscribes to the Bluesky Jetstream firehose (a public WebSocket) directly from the browser",
     type: "website",
+    url: "/",
     siteName: "Jetstream Deck",
     locale: "en_US",
   },
   twitter: {
-    card: "summary",
+    // 이미지는 app/opengraph-image.tsx — Next가 twitter:image로도 내보낸다
+    card: "summary_large_image",
     title: "Jetstream Deck",
     description: "A live dashboard for the Bluesky Jetstream firehose",
   },
